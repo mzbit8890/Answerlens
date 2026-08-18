@@ -1,6 +1,6 @@
 # Architecture
 
-AnswerLens uses a Next.js frontend and a FastAPI backend. The backend currently provides a health endpoint, secure bounded website crawling, deterministic machine-readable surface inspection, strict brand/evidence domain contracts, and a typed Gemini structured-output provider.
+AnswerLens uses a Next.js frontend and a FastAPI backend. The backend currently provides a health endpoint, secure bounded website crawling, deterministic machine-readable surface inspection, strict brand/evidence domain contracts, a typed Gemini structured-output provider, and a bounded Brand Intelligence extraction agent.
 
 ## Website crawler
 
@@ -120,3 +120,34 @@ The Gemini provider layer does not contain Brand Intelligence prompts, crawler-e
 - `pydantic==2.12.5`
 - Model: `gemini-2.5-flash`
 - Maximum structured-output attempts: 2
+
+## Brand Intelligence Agent
+
+`backend/agents/brand_agent.py` implements the Brand Intelligence extraction stage. It consumes an existing `CrawlResult`, an existing `MachineReadableAudit`, an injected `StructuredOutputProvider`, and an optional user-supplied business category. It does not crawl, refetch pages, resolve DNS, perform external search, or depend directly on Gemini.
+
+The agent first prepares a deterministic bounded evidence representation from successful crawl pages. Failed crawl records are excluded from usable evidence. Each retained page receives a stable `page_N` source label and preserves its requested URL, final URL where available, title, meta description, headings, and readable page content within explicit prompt-size bounds.
+
+Machine-readable observations are added separately and remain explicitly publisher-provided, untrusted evidence. Present `llms.txt` title and summary information may be included within bounds, along with encountered structured-data types and their source pages. Malformed structured data is not promoted to valid structured evidence. Neither `llms.txt` nor JSON-LD is treated as independent verification.
+
+The Brand Intelligence prompt establishes its extraction rules before inserting source material. Crawled content, metadata, headings, `llms.txt`, structured-data observations, and user-supplied category context are treated as untrusted data rather than instructions. The prompt explicitly instructs the model to ignore prompt-injection attempts in source material, avoid outside knowledge, avoid unsupported factual invention, and leave optional information empty when the supplied evidence is insufficient.
+
+Optional business-category input is normalized, bounded, serialized as data, and placed inside a separately delimited `USER-SUPPLIED CONTEXT (UNTRUSTED DATA)` section. It may help interpret ambiguous evidence but is not represented as independent website evidence. The model is explicitly instructed to treat this context only as data and not allow it to override the extraction rules.
+
+The extraction function requests the existing application-owned `BrandProfile` model through `StructuredOutputProvider`. It does not import or configure Gemini directly and does not duplicate provider-level structured-output retry behavior. If no successful crawl evidence exists, extraction fails explicitly before the provider is called. Provider failures remain visible and no fallback or fabricated `BrandProfile` is produced.
+
+Candidate `BrandClaim` values generated at this stage remain unverified propositions. The Brand Intelligence Agent does not create `ClaimEvidence`, assign support states, assign confidence, or claim that generated propositions are verified. Those responsibilities remain deferred to the Claim Evidence Map stage.
+
+### Brand Intelligence evidence limits
+
+- Maximum successful website pages included: 8
+- Maximum readable content per page: 4,000 characters
+- Maximum headings per page: 12
+- Maximum characters per heading: 200
+- Maximum meta-description length: 500 characters
+- Maximum `llms.txt` title length: 300 characters
+- Maximum `llms.txt` summary length: 1,000 characters
+- Maximum structured-data types included: 40
+- Maximum total prepared evidence length: 40,000 characters
+- Optional category length follows the existing domain-schema category bound
+
+Evidence truncation is deterministic. The agent performs no preliminary LLM summarization and no random evidence sampling.

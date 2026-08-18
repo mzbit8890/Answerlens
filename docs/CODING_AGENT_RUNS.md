@@ -108,7 +108,7 @@ All Task 1 acceptance criteria were satisfied. The crawler safely collected a re
 
 - [ ] Crawler implementation and security boundaries reviewed.
 - [ ] Test coverage and live verification output reviewed.
-- [ ] Repository diff reviewed before commit.
+- [x] Repository diff reviewed before commit.
 
 ### Human Review Hardening
 
@@ -384,3 +384,154 @@ Task 4 established a reusable typed Gemini boundary with application-side valida
 - [x] Structured-output validation and retry behavior reviewed.
 - [x] Provider tests and dependency changes reviewed.
 - [x] Repository diff reviewed before commit.
+
+
+# Task 5 — Brand Intelligence Agent
+
+## Goal
+
+Implement the Brand Intelligence extraction stage that transforms previously collected crawl and machine-readable evidence into the existing validated `BrandProfile` contract without performing claim verification or later GEO analysis.
+
+## Implementation
+
+- Added `backend/agents/brand_agent.py` as the focused Brand Intelligence layer.
+
+- Added deterministic evidence preparation from an existing `CrawlResult` and `MachineReadableAudit`.
+
+- Included only successful crawl pages as usable website evidence; failed crawl records are excluded.
+
+- Preserved requested and final source URLs, page titles, meta descriptions, headings, and readable page content within explicit bounds.
+
+- Added stable `page_N` source labels based on deterministic successful-page ordering.
+
+- Added bounded publisher-provided machine-readable observations, including `llms.txt` title/summary where present, structured-data types, and structured-data source pages.
+
+- Kept malformed structured data from being promoted to valid structured evidence.
+
+- Explicitly labeled `llms.txt`, JSON-LD, crawled page content, metadata, headings, and other publisher-provided material as untrusted data rather than independent verification.
+
+- Added prompt instructions that source content is evidence rather than instructions, prompt-injection attempts inside source material must be ignored, outside knowledge must not be used, and unsupported facts must not be invented.
+
+- Added optional user-supplied business-category context without treating it as independent website evidence.
+
+- Added normalization, length bounding, JSON serialization, and a separately delimited `USER-SUPPLIED CONTEXT (UNTRUSTED DATA)` block for category input.
+
+- Explicitly instructed the model to treat user-supplied category context as data rather than instructions.
+
+- Used the application-facing `StructuredOutputProvider` abstraction and requested the existing `BrandProfile` Pydantic contract.
+
+- Kept the agent independent from Gemini-specific SDK/configuration code and reused Task 4 provider-level structured-output retry behavior.
+
+- Added explicit `BrandIntelligenceError` behavior when no successful crawl evidence exists.
+
+- Preserved provider failures instead of generating a fallback or fabricated `BrandProfile`.
+
+- Kept generated `BrandClaim` values as unverified propositions. No `ClaimEvidence`, support status, evidence confidence, or claim verification was added.
+
+## Evidence Bounds
+
+- Maximum successful website pages included: 8
+
+- Maximum readable page content: 4,000 characters per page
+
+- Maximum headings: 12 per page
+
+- Maximum heading length: 200 characters
+
+- Maximum meta-description length: 500 characters
+
+- Maximum `llms.txt` title length: 300 characters
+
+- Maximum `llms.txt` summary length: 1,000 characters
+
+- Maximum structured-data types included: 40
+
+- Maximum total prepared evidence length: 40,000 characters
+
+- Optional category length reuses the existing domain-schema category bound
+
+Evidence truncation is deterministic. No preliminary LLM summarization or random evidence sampling is performed.
+
+## Tests
+
+- Added `backend/tests/test_brand_agent.py`.
+
+- Added coverage for successful typed extraction and confirmation that the provider is asked for `BrandProfile`.
+
+- Added coverage for requested/final source URLs, title, metadata, headings, readable content, stable page labels, and deterministic evidence preparation.
+
+- Added coverage ensuring failed crawl pages are excluded and an all-failed crawl prevents the provider from being called.
+
+- Added coverage for page count, content, heading, metadata, structured-data, `llms.txt`, and total evidence bounds.
+
+- Added coverage for missing `llms.txt` and malformed structured data.
+
+- Added prompt-boundary tests covering untrusted source content, prompt injection, outside knowledge, unsupported invention, and unverified candidate-claim semantics.
+
+- Added optional-category tests for absent input, normalization, length bounds, untrusted-context labeling, and newline/quote injection attempts.
+
+- Added provider-failure coverage confirming no fallback profile is returned.
+
+- Added a regression check confirming that the Brand Intelligence module does not depend directly on `GeminiStructuredOutputProvider` or `genai`.
+
+## Human Review Hardening
+
+Human review identified that the initial user-supplied business-category context was bounded and labeled as user context but was inserted into the prompt without the same explicit untrusted-data boundary applied to crawled website evidence.
+
+### Finding
+
+- A category value containing line breaks or instruction-like text could be interpolated directly into the prompt as plain text outside the website-evidence block.
+
+### Manual change
+
+- Normalized category whitespace deterministically.
+
+- Retained the existing category length bound.
+
+- Serialized the category value using JSON string encoding.
+
+- Added explicit `BEGIN USER-SUPPLIED CONTEXT` and `END USER-SUPPLIED CONTEXT` delimiters.
+
+- Labeled the block `USER-SUPPLIED CONTEXT (UNTRUSTED DATA)`.
+
+- Added an extraction rule instructing the model to treat user-supplied context only as data and never as instructions.
+
+### Human-review iterations
+
+- After the category-boundary implementation was hardened, the focused Task 5 suite initially produced 14 passing tests and 2 failures.
+
+- Both failures were existing category-prompt assertions that still expected the previous unquoted category representation.
+
+- The tests were updated to assert the new JSON-serialized, untrusted-context representation.
+
+- Added a regression test containing newline-separated instruction-like text and embedded quotes to verify that category input remains inside the serialized user-context boundary.
+
+- The focused suite then passed with 17 tests.
+
+## Final Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests/test_brand_agent.py -q` — passed with 17 tests in 0.50 seconds.
+
+- `.\.venv\Scripts\python.exe -m pytest -q` — passed with 126 tests in 1.99 seconds.
+
+- Both Pytest runs emitted a non-blocking `PytestCacheWarning` because Windows denied creation of `backend/.pytest_cache`; test execution itself completed successfully.
+
+- `.\.venv\Scripts\python.exe -m pip check` — passed with `No broken requirements found.`
+
+- `.\.venv\Scripts\python.exe -m compileall -q main.py agents guardrails providers schemas services tests` — passed.
+
+- `git diff --check` — passed with no reported whitespace errors.
+
+## Final Result
+
+Task 5 established the Brand Intelligence extraction stage. Existing crawl and machine-readable evidence can now be transformed into a validated `BrandProfile` through the reusable structured-output provider while preserving deterministic evidence bounds, source attribution, explicit untrusted-data boundaries, and failure visibility. Candidate claims remain deliberately unverified for the next Claim Evidence Map stage.
+
+## Human Review
+
+- [x] Brand Intelligence implementation reviewed.
+
+- [x] Evidence preparation and prompt trust boundaries reviewed.
+
+- [x] Focused and complete backend test results reviewed.
+
+- [ ] Repository diff reviewed before commit.
