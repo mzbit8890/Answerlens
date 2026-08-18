@@ -50,41 +50,6 @@ Create the initial production-style AnswerLens development foundation with a min
 
 All Task 0 acceptance criteria were satisfied. The frontend installed, linted, and built successfully; the backend test passed; a live Uvicorn health request succeeded; the required initial structure exists; no secrets were added; and no AnswerLens product features were implemented.
 
-### Human Review Hardening
-
-Human review identified that evidence-reference URL validation was locally syntactic but did not reuse the existing non-resolving public-reference safety boundary.
-
-#### Finding
-
-- EvidenceReference rejected malformed, non-HTTP, relative, and credential-bearing URLs, but localhost and literal non-public IP references could still be retained as syntactically valid evidence URLs.
-
-#### Manual change
-
-- Reused the existing non-resolving `validate_url_reference()` guardrail for evidence URLs.
-- Evidence-reference validation remains network-free and performs no DNS lookup.
-- Localhost and literal non-global/private IP references are now rejected consistently with the existing AnswerLens reference-validation boundary.
-- No fetching behavior or SSRF/network path was introduced into the schema layer.
-
-#### Tests added
-
-- Added coverage rejecting:
-  - `http://localhost/source`
-  - `http://127.0.0.1/source`
-  - `http://10.0.0.5/source`
-
-#### Human-review iterations
-
-- The first manual edit left the removed `TypeAdapter` implementation line in place, producing a collection-time `NameError`; the stale line was removed.
-- The first placement of the new parametrized test interrupted an existing parametrized decorator/function pair, producing a Pytest collection error; the test was moved into the evidence-URL test section.
-- After those manual corrections, the focused and complete suites passed.
-
-#### Final human-review verification
-
-- `.\.venv\Scripts\python.exe -m pytest tests/test_domain_schemas.py -q` — 34 passed.
-- `.\.venv\Scripts\python.exe -m pytest -q` — 95 passed.
-- `.\.venv\Scripts\python.exe -m pip check` — No broken requirements found.
-- `.\.venv\Scripts\python.exe -m compileall -q main.py guardrails schemas services tests` — passed.
-- `git diff --check` — passed; only Windows LF/CRLF conversion warnings were reported.
 
 ## Human Review
 
@@ -328,9 +293,94 @@ No test or implementation repair iteration was required. The focused schema suit
 
 All Task 3 acceptance criteria were satisfied. Strict bounded brand and evidence contracts exist, candidate claims remain distinct from support decisions, evidence sources preserve URLs and excerpts, uncertain states can remain evidence-free, unknown output fields are rejected, and validation performs no network access.
 
+### Human Review Hardening
+
+Human review identified that evidence-reference URL validation was locally syntactic but did not reuse the existing non-resolving public-reference safety boundary.
+
+#### Finding
+
+- `EvidenceReference` rejected malformed, non-HTTP, relative, and credential-bearing URLs, but localhost and literal non-public IP references could still be retained as syntactically valid evidence URLs.
+
+#### Manual change
+
+- Reused the existing non-resolving `validate_url_reference()` guardrail for evidence URLs.
+- Evidence-reference validation remains network-free and performs no DNS lookup.
+- Localhost and literal non-global/private IP references are now rejected consistently with the existing AnswerLens reference-validation boundary.
+- No fetching behavior or SSRF/network path was introduced into the schema layer.
+
+#### Tests added
+
+- Added coverage rejecting:
+  - `http://localhost/source`
+  - `http://127.0.0.1/source`
+  - `http://10.0.0.5/source`
+
+#### Human-review iterations
+
+- The first manual edit left the removed `TypeAdapter` implementation line in place, producing a collection-time `NameError`; the stale line was removed.
+- The first placement of the new parametrized test interrupted an existing parametrized decorator/function pair, producing a Pytest collection error; the test was moved into the evidence-URL test section.
+- After those manual corrections, the focused and complete suites passed.
+
+#### Final human-review verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests/test_domain_schemas.py -q` — 34 passed.
+- `.\.venv\Scripts\python.exe -m pytest -q` — 95 passed.
+- `.\.venv\Scripts\python.exe -m pip check` — No broken requirements found.
+- `.\.venv\Scripts\python.exe -m compileall -q main.py guardrails schemas services tests` — passed.
+- `git diff --check` — passed; only Windows LF/CRLF conversion warnings were reported.
+
 ## Human Review
 
 - [x] Domain schemas reviewed.
 - [x] Validation and evidence semantics reviewed.
 - [x] Test results reviewed.
+- [x] Repository diff reviewed before commit.
+
+
+# Task 4 — Gemini Structured-Output Provider
+
+## Goal
+
+Introduce a reusable asynchronous Gemini provider that requests structured output and validates every response against application-owned Pydantic models without implementing Brand Intelligence or other later agent behavior.
+
+## Implementation
+
+- Added a generic asynchronous `StructuredOutputProvider` protocol.
+- Added `GeminiStructuredOutputProvider` using the official Google Gen AI SDK.
+- Configured the project-selected `gemini-2.5-flash` model.
+- Added environment-based `GEMINI_API_KEY` configuration for real provider construction.
+- Added injected-client support so automated tests require neither an API key nor network access.
+- Configured structured JSON responses using the caller-supplied Pydantic response model.
+- Added application-side `model_validate_json()` validation after generation.
+- Added explicit configuration, request, and structured-output errors.
+- Bounded invalid structured-output recovery to two total generation attempts.
+- API/request failures fail immediately rather than entering the malformed-output retry path.
+- Added `google-genai==2.18.1`.
+- Updated Pydantic from `2.11.7` to `2.12.5` for SDK dependency compatibility.
+
+## Iterations / Failures
+
+- Initial dependency installation failed because the selected Google Gen AI SDK version required Pydantic `>=2.12.5`; the Pydantic pin was updated and existing tests remained green.
+- The first focused provider run passed but produced a Pytest collection warning because a fixture model was named `TestOutput`; it was renamed and the warning disappeared.
+- One version-report command used the wrong working-directory-relative virtual-environment path; it was rerun successfully from `backend`.
+
+## Verification
+
+- Focused Gemini provider tests — 14 passed.
+- Complete backend suite — 109 passed.
+- `python -m pip check` — no broken requirements.
+- `python -m compileall -q main.py agents graph guardrails providers schemas services tests` — passed.
+- `git diff --check` — passed.
+- Installed versions confirmed `google-genai==2.18.1` and `pydantic==2.12.5`.
+- No real Gemini API request was made during automated verification.
+
+## Final Result
+
+Task 4 established a reusable typed Gemini boundary with application-side validation, bounded malformed-output retries, explicit error handling, environment-only credential configuration, and fully mocked automated tests. Product-specific brand extraction remains deferred.
+
+## Human Review
+
+- [x] Gemini provider implementation reviewed.
+- [x] Structured-output validation and retry behavior reviewed.
+- [x] Provider tests and dependency changes reviewed.
 - [x] Repository diff reviewed before commit.

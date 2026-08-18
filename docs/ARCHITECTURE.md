@@ -1,6 +1,6 @@
 # Architecture
 
-AnswerLens uses a Next.js frontend and a FastAPI backend. The backend currently exposes its Task 0 health check and provides a deterministic website evidence crawler as an internal service.
+AnswerLens uses a Next.js frontend and a FastAPI backend. The backend currently provides a health endpoint, secure bounded website crawling, deterministic machine-readable surface inspection, strict brand/evidence domain contracts, and a typed Gemini structured-output provider.
 
 ## Website crawler
 
@@ -99,3 +99,24 @@ Every Task 3 model rejects unknown fields, trims surrounding string whitespace, 
 - Positioning and evidence excerpts: 2,000 characters
 - Claim statements and confidence reasons: 1,000 characters
 - Evidence URLs: 2,048 characters
+
+## Gemini structured-output provider
+
+`backend/providers/base.py` defines the application-facing asynchronous `StructuredOutputProvider` contract. Callers provide a prompt and an application-owned Pydantic response model and receive that validated model rather than an untyped dictionary.
+
+`backend/providers/gemini.py` implements this contract using the official Google Gen AI SDK and the project-selected `gemini-2.5-flash` model. Real provider construction reads `GEMINI_API_KEY` from the environment. Tests and other controlled callers can inject a client so automated verification requires neither credentials nor network access.
+
+The provider requests `application/json` structured output and supplies the caller-provided Pydantic model as Gemini's response schema. Returned response text is still validated again with the same application-owned Pydantic model using `model_validate_json()`. Empty, malformed, schema-invalid, or unexpected-extra-field output therefore cannot silently become valid application data.
+
+Invalid structured output is retried within an explicit bound of two total generation attempts: the initial generation plus at most one retry. This provider-level retry handles malformed or invalid model output only and is separate from the later autonomous evidence-research retry loop.
+
+Configuration failures and Gemini request/API failures remain explicit and are not converted into fabricated output. Error messages do not expose the configured API key, while underlying exceptions are preserved as causes where useful.
+
+The Gemini provider layer does not contain Brand Intelligence prompts, crawler-evidence interpretation, claim verification, Tavily retrieval, LangGraph orchestration, GEO scoring, persistence, or frontend behavior. Those responsibilities remain in later application layers.
+
+### Gemini provider dependencies
+
+- `google-genai==2.18.1`
+- `pydantic==2.12.5`
+- Model: `gemini-2.5-flash`
+- Maximum structured-output attempts: 2
