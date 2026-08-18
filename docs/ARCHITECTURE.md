@@ -75,3 +75,27 @@ JSON-LD is reused from successful crawl pages without refetching them. Bounded i
 - Maximum structured-data items: 500
 - Maximum structured-data traversal depth: 20
 - Maximum structured-data dictionary/list nodes visited: 5,000
+
+## Core brand and evidence domain contracts
+
+`backend/schemas/brand.py` and `backend/schemas/evidence.py` define application-owned Pydantic contracts for later structured processing. This layer performs data validation only: it does not call an LLM, fetch evidence, resolve DNS, or decide support automatically.
+
+`BrandProfile` holds a required brand name plus optional category and positioning fields, bounded audience, capability, and use-case lists, and bounded candidate `BrandClaim` records. A candidate claim is only a proposition; its existence does not imply factual verification.
+
+`EvidenceReference` preserves a normalized HTTP/HTTPS URL, a required excerpt, and one explicit source type: owned webpage, structured data, `llms.txt`, brand-owned external, or independent external. URL validation reuses the non-resolving reference-safety boundary and rejects malformed, non-HTTP, credential-bearing, localhost, and literal non-global/private-IP URLs without DNS resolution or network access. Structured-data and `llms.txt` sources remain publisher-provided evidence types, not independent verification.
+
+`ClaimEvidence` connects one candidate claim to an explicit support state (`supported`, `insufficient_evidence`, or `assumption`), evidence references, a `low`/`medium`/`high` confidence level, and a required human-readable confidence reason. Unsupported and assumption states may contain no evidence. A supported state requires at least one explicit evidence reference; validation never manufactures one.
+
+Every Task 3 model rejects unknown fields, trims surrounding string whitespace, rejects empty important strings, and uses default factories for lists. Output is bounded as follows:
+
+- Audiences per profile: 10
+- Capabilities per profile: 20
+- Use cases per profile: 15
+- Candidate claims per profile: 30
+- Evidence references per claim: 10
+- Brand name and category: 200 characters each
+- Audience entries: 200 characters
+- Capability and use-case entries: 300 characters
+- Positioning and evidence excerpts: 2,000 characters
+- Claim statements and confidence reasons: 1,000 characters
+- Evidence URLs: 2,048 characters

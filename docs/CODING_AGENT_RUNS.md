@@ -50,6 +50,42 @@ Create the initial production-style AnswerLens development foundation with a min
 
 All Task 0 acceptance criteria were satisfied. The frontend installed, linted, and built successfully; the backend test passed; a live Uvicorn health request succeeded; the required initial structure exists; no secrets were added; and no AnswerLens product features were implemented.
 
+### Human Review Hardening
+
+Human review identified that evidence-reference URL validation was locally syntactic but did not reuse the existing non-resolving public-reference safety boundary.
+
+#### Finding
+
+- EvidenceReference rejected malformed, non-HTTP, relative, and credential-bearing URLs, but localhost and literal non-public IP references could still be retained as syntactically valid evidence URLs.
+
+#### Manual change
+
+- Reused the existing non-resolving `validate_url_reference()` guardrail for evidence URLs.
+- Evidence-reference validation remains network-free and performs no DNS lookup.
+- Localhost and literal non-global/private IP references are now rejected consistently with the existing AnswerLens reference-validation boundary.
+- No fetching behavior or SSRF/network path was introduced into the schema layer.
+
+#### Tests added
+
+- Added coverage rejecting:
+  - `http://localhost/source`
+  - `http://127.0.0.1/source`
+  - `http://10.0.0.5/source`
+
+#### Human-review iterations
+
+- The first manual edit left the removed `TypeAdapter` implementation line in place, producing a collection-time `NameError`; the stale line was removed.
+- The first placement of the new parametrized test interrupted an existing parametrized decorator/function pair, producing a Pytest collection error; the test was moved into the evidence-URL test section.
+- After those manual corrections, the focused and complete suites passed.
+
+#### Final human-review verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests/test_domain_schemas.py -q` — 34 passed.
+- `.\.venv\Scripts\python.exe -m pytest -q` — 95 passed.
+- `.\.venv\Scripts\python.exe -m pip check` — No broken requirements found.
+- `.\.venv\Scripts\python.exe -m compileall -q main.py guardrails schemas services tests` — passed.
+- `git diff --check` — passed; only Windows LF/CRLF conversion warnings were reported.
+
 ## Human Review
 
 - [ ] Frontend manually opened and verified at localhost:3000.
@@ -250,3 +286,51 @@ No implementation repair iteration was required. The focused Task 2.1 suite pass
 
 - Reference-only validation intentionally does not determine where a hostname would resolve because no connection occurs in Task 2. Any future fetch of a retained URL must pass full DNS validation and connection-time public-IP pinning first.
 - Same-site consistency uses the existing crawler scope rule rather than registrable-domain ownership analysis. It is a deterministic integrity check, not proof of organizational ownership.
+
+# Task 3 — Core Brand & Evidence Domain Schemas
+
+## Goal
+
+Define strict, reusable, application-owned Pydantic contracts for brand profiles, candidate claims, evidence references, claim support states, and confidence before any Gemini or Brand Intelligence implementation.
+
+## Implementation
+
+- Added `BrandProfile` with a required bounded brand name, optional category and positioning, bounded audience/capability/use-case lists, and bounded candidate claims.
+- Added `BrandClaim` as a proposition-only record that does not encode verification.
+- Added `EvidenceReference` with a locally validated HTTP/HTTPS URL, required excerpt, and explicit evidence source enum.
+- Added practical source types for owned webpages, structured data, `llms.txt`, brand-owned external sources, and independent external sources.
+- Added explicit `supported`, `insufficient_evidence`, and `assumption` support states plus `low`, `medium`, and `high` confidence levels.
+- Added `ClaimEvidence` to connect a candidate claim to support status, bounded evidence references, confidence, and a required confidence reason.
+- Required supported claims to include at least one explicit evidence reference while allowing insufficient-evidence and assumption states to remain empty.
+- Configured all Task 3 models to reject unknown fields, trim and validate important strings, use safe list defaults, and enforce explicit demo-scale list and string limits.
+- Kept URL validation local and network-free; no Gemini, provider, prompt, extraction, or evidence-search logic was added.
+
+## Tests
+
+- Added coverage for complete and minimal profiles, whitespace rejection, every configured profile list limit, and unknown fields.
+- Added coverage for valid, empty, and overlong candidate claims.
+- Added HTTP/HTTPS evidence URL coverage plus malformed, non-HTTP, relative, and credential-bearing rejection.
+- Added required excerpt and explicit source-type validation.
+- Added supported, insufficient-evidence, and assumption mappings, the supported-evidence invariant, confidence enum/reason validation, nested extra-field rejection, evidence-list limits, and deterministic JSON serialization.
+
+## Failures and iterations
+
+No test or implementation repair iteration was required. The focused schema suite and complete backend suite passed on their first runs.
+
+## Final verification
+
+- `.\\.venv\\Scripts\\python.exe -m pytest tests/test_domain_schemas.py -q` — passed with 31 tests in 0.21 seconds.
+- `.\\.venv\\Scripts\\python.exe -m pytest -q` — passed with 92 tests in 1.46 seconds.
+- `.\\.venv\\Scripts\\python.exe -m pip check` — passed with `No broken requirements found.`
+- `.\\.venv\\Scripts\\python.exe -m compileall -q main.py guardrails schemas services tests` — passed.
+
+## Final Result
+
+All Task 3 acceptance criteria were satisfied. Strict bounded brand and evidence contracts exist, candidate claims remain distinct from support decisions, evidence sources preserve URLs and excerpts, uncertain states can remain evidence-free, unknown output fields are rejected, and validation performs no network access.
+
+## Human Review
+
+- [x] Domain schemas reviewed.
+- [x] Validation and evidence semantics reviewed.
+- [x] Test results reviewed.
+- [x] Repository diff reviewed before commit.
