@@ -727,3 +727,47 @@ No complete live audit metrics were fabricated from that interrupted run.
 The external 503 remained an explicit provider failure and production security, grounding rules, retry limits, and model configuration were not weakened to bypass it.
 
 Task 8 intentionally does not implement PostgreSQL/Neon persistence, audit APIs, baseline/rerun comparison, frontend audit screens, or deployment. Those remain Task 9.
+
+# Task 9 Productization Architecture
+
+## PostgreSQL persistence boundary
+
+Production persistence uses `psycopg` 3 and `DATABASE_URL` with parameterized SQL. An idempotent SQL migration creates one compact `audits` table containing UUID identity, submitted inputs, running/completed/failed status, an immutable previous-audit link, JSONB result and delta projections, safe failure fields, and timezone-aware timestamps. Indexes cover target URL, previous audit ID, and creation time.
+
+This portfolio-sized production model intentionally stores one validated JSONB snapshot rather than prematurely normalizing every analytical object into separate tables. Automated tests inject a repository and do not require PostgreSQL.
+
+## Audit projection and service
+
+The persisted/API `PersistedAuditResult` is application-owned. It includes the BrandProfile, claim evidence map, bounded machine-readable summary, recommendation queries, external research, grounded evaluations, bounded research rounds, evidence gaps, experiments, deterministic metrics, and execution trace. Crawl bodies, prompts, provider payloads, credentials, raw exceptions, and stack traces are excluded.
+
+`AuditService` creates the running row, invokes the existing `run_agentic_audit` workflow, validates/projects the result, and completes or safely fails the row. It does not reproduce agent logic or add a workflow-wide retry loop. Failures receive bounded machine-readable codes and user-safe messages while their Python causes remain chained internally.
+
+## Audit API and configuration
+
+FastAPI exposes `POST /audits`, `GET /audits/{audit_id}`, and `POST /audits/{audit_id}/rerun`. `GET /health` remains independent of database configuration. Audit endpoints return an explicit 503 when `DATABASE_URL` is absent or PostgreSQL is unavailable. CORS origins come from `CORS_ORIGINS` and default only to `http://localhost:3000` for local development.
+
+## Baseline, rerun, and delta
+
+Reruns reuse the original target, category, and known-competitor inputs without overwriting the baseline. When both snapshots completed, application code compares Evidence Coverage, Query Readiness, Strong Queries, Evidence Gaps, and External Evidence Diversity as `current - previous`. Lower Evidence Gaps is explicitly interpreted as improvement. New and resolved gap queries use normalized exact text identity; no LLM or semantic matching is used.
+
+## Frontend routes and data flow
+
+The Next.js frontend uses `NEXT_PUBLIC_API_BASE_URL` and a typed fetch boundary. `/` submits real audit input and shows an honest indeterminate wait. `/audits/[id]` renders the saved overview, `/audits/[id]/queries` renders grounded query detail, and `/audits/[id]/experiments` renders experiments plus deterministic rerun deltas. Runtime pages fetch saved API data; production builds perform no audits and require no Gemini, Tavily, or database credentials.
+
+Loading, unreachable, not-found, failed, unavailable, and empty states remain distinct. External evidence links use `noopener noreferrer`, publisher text is rendered as text rather than injected HTML, and no production component contains mock audit results.
+
+## Deployment boundary
+
+The backend is ready for Render through a normal Uvicorn command and backend-only `GEMINI_API_KEY`, `TAVILY_API_KEY`, `DATABASE_URL`, and `CORS_ORIGINS`. The frontend is ready for Vercel with only `NEXT_PUBLIC_API_BASE_URL`. Neon hosts PostgreSQL after executing `python -m db.migrate`. Task 9 prepares these boundaries but does not claim that any cloud deployment occurred.
+
+## Provider diagnostics and safe failures
+
+Server-side workflow diagnostics record the stage, failure category, exception class, safe root-cause class, safe provider status code when available, and a bounded sanitized message. Configured Gemini, Tavily, and database credentials are redacted. Raw provider details, quota payloads, credentials, and internal exceptions are not exposed through the API or frontend.
+
+## Provider rate-limit handling
+
+Gemini HTTP 429 responses map to `gemini_rate_limited` with the public message: "AI provider rate limit reached. Please try again later." Other Gemini provider failures remain `gemini_unavailable`. Failed audit records are persisted normally, and no unbounded automatic provider retry is introduced.
+
+## Verification architecture
+
+Successful workflow integration coverage runs the real LangGraph graph, agents, schemas, semantic validation, routing, metrics, result projection, `AuditService`, and audit creation/retrieval API path. Deterministic substitutes are injected only at external or nondeterministic boundaries. This provides repeatable production-path verification independent of current external API availability without adding a production mock mode.

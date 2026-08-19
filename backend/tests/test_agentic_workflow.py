@@ -1,8 +1,12 @@
 import asyncio
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 
 import graph.workflow as workflow
+from main import app, get_audit_service
 from providers.search import RawSearchResult, SearchRequestError
 from schemas.agentic import (
     AgenticAuditTimeoutError,
@@ -36,6 +40,8 @@ from schemas.query import (
     RecommendationQuerySet,
     SourceOwnership,
 )
+from schemas.audit import AuditRecord, AuditStatus
+from services.audit_service import AuditService
 
 
 QUERY = "Best project tools for engineering teams"
@@ -322,3 +328,93 @@ def test_graph_contains_real_conditional_research_edges():
     edges = {(edge.source, edge.target, edge.conditional) for edge in drawable.edges}
     assert ("run_grounded_query_evaluations", "plan_targeted_research", True) in edges
     assert ("re_evaluate_changed_queries", "plan_targeted_research", True) in edges
+
+
+class OfflineAuditRepository:
+    def __init__(self):
+        self.records: dict[UUID, AuditRecord] = {}
+
+    async def create_running_audit(
+        self, target_url, category, known_competitors, previous_audit_id=None
+    ):
+        record = AuditRecord(
+            id=uuid4(),
+            target_url=target_url,
+            category=category,
+            known_competitors=known_competitors,
+            status=AuditStatus.RUNNING,
+            previous_audit_id=previous_audit_id,
+            created_at=datetime.now(timezone.utc),
+        )
+        self.records[record.id] = record
+        return record
+
+    async def get_audit(self, audit_id):
+        return self.records.get(audit_id)
+
+    async def complete_audit(self, audit_id, result, delta):
+        completed = self.records[audit_id].model_copy(
+            update={
+                "status": AuditStatus.COMPLETED,
+                "result": result,
+                "delta": delta,
+                "completed_at": datetime.now(timezone.utc),
+            }
+        )
+        self.records[audit_id] = completed
+        return completed
+
+    async def fail_audit(self, audit_id, error_code, error_message):
+        raise AssertionError("the deterministic successful workflow must not fail")
+
+
+def test_offline_full_graph_persists_and_returns_completed_api_audit(monkeypatch):
+    patch_network_stages(monkeypatch)
+    structured_provider = WorkflowProvider("always_low")
+    search_provider = FakeSearch()
+
+    async def deterministic_workflow(target_url, category, known_competitors):
+        return await workflow.run_agentic_audit(
+            target_url,
+            category,
+            known_competitors,
+            structured_provider=structured_provider,
+            search_provider=search_provider,
+        )
+
+    repository = OfflineAuditRepository()
+    app.dependency_overrides[get_audit_service] = lambda: AuditService(
+        repository, deterministic_workflow
+    )
+    try:
+        client = TestClient(app)
+        created = client.post(
+            "/audits",
+            json={
+                "target_url": "https://example.com",
+                "category": "Project software",
+                "known_competitors": ["Acme"],
+            },
+        )
+        assert created.status_code == 200
+        audit = created.json()
+        loaded = client.get(f"/audits/{audit['id']}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert loaded.status_code == 200
+    assert loaded.json() == audit
+    assert audit["status"] == "completed"
+    result = audit["result"]
+    assert result["target_url"] == "https://example.com/"
+    assert result["brand_profile"]["brand"] == "Example"
+    assert result["claim_evidence_map"] == {"records": []}
+    assert len(result["query_set"]["queries"]) == 1
+    assert result["external_research"]["query_results"]
+    assert len(result["query_evaluations"]["evaluations"]) == 1
+    assert len(result["research_rounds"]) == 2
+    assert len(result["evidence_gaps"]["gaps"]) == 1
+    assert len(result["experiments"]["experiments"]) == 1
+    assert result["metrics"]["evidence_gaps"] == 1
+    assert result["execution_trace"][-1]["stage"] == "audit_complete"
+    assert repository.records[UUID(audit["id"])].status is AuditStatus.COMPLETED

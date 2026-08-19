@@ -1,17 +1,3 @@
-export default function Home() {
-  return (
-    <main className="flex min-h-screen items-center justify-center px-6">
-      <section className="max-w-xl text-center">
-        <p className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-          AnswerLens
-        </p>
-        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-          Brand evidence, brought into focus.
-        </h1>
-        <p className="mt-4 text-lg leading-8 text-slate-600">
-          The development foundation is ready. Evidence audits will arrive in a future iteration.
-        </p>
-      </section>
-    </main>
-  );
-}
+"use client";
+import { FormEvent,useState } from "react"; import { useRouter } from "next/navigation"; import { ApiError,createAudit,normalizeCompetitors } from "@/lib/api"; import { Shell } from "@/components/shell";
+export default function Home(){const router=useRouter();const[website,setWebsite]=useState("");const[category,setCategory]=useState("");const[competitors,setCompetitors]=useState("");const[running,setRunning]=useState(false);const[error,setError]=useState("");async function submit(event:FormEvent){event.preventDefault();if(!website.trim()||running)return;setRunning(true);setError("");try{const audit=await createAudit({target_url:website.trim(),category:category.trim()||undefined,known_competitors:normalizeCompetitors(competitors)});router.push(`/audits/${audit.id}`)}catch(e){if(e instanceof ApiError&&e.audit){router.push(`/audits/${e.audit.id}`);return}setError(e instanceof Error?e.message:"Audit failed.");setRunning(false)}}return <Shell><div className="hero-grid"><section><p className="eyebrow">AI brand evidence auditor</p><h1>See what answer engines can actually support.</h1><p className="lede">AnswerLens crawls your public evidence, tests real recommendation intents, investigates independent sources, and turns gaps into measurable experiments.</p><div className="principles"><span>Source-grounded</span><span>Bounded research</span><span>No fake ranking score</span></div></section><form className="audit-form" onSubmit={submit}><div><p className="eyebrow">New evidence audit</p><h2>Analyze a company</h2></div><label>Company website<input type="url" required placeholder="https://linear.app" value={website} onChange={e=>setWebsite(e.target.value)}/></label><label>Business category <small>Optional</small><input placeholder="Project management software" value={category} onChange={e=>setCategory(e.target.value)}/></label><label>Known competitors <small>Optional, comma or line separated</small><textarea rows={3} placeholder="Jira, Asana, ClickUp" value={competitors} onChange={e=>setCompetitors(e.target.value)}/></label>{error&&<p className="error" role="alert">{error}</p>}<button disabled={running}>{running?"Running real evidence audit…":"Run Evidence Audit"}</button><p className="form-note">This runs live crawling, Gemini analysis, and external research. It may take up to approximately 120 seconds.</p></form></div></Shell>}

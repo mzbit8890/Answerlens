@@ -1,0 +1,1 @@
+"use client"; import { useParams } from "next/navigation"; import { AuditLoader } from "@/components/audit-loader"; import { Overview } from "@/components/overview"; import { Shell } from "@/components/shell"; export default function AuditPage(){const{id}=useParams<{id:string}>();return <Shell><AuditLoader id={id}>{audit=><Overview audit={audit}/>}</AuditLoader></Shell>}

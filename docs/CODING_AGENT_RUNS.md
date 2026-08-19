@@ -918,3 +918,152 @@ validate_target
 → generate_geo_experiments
 → calculate_metrics
 → complete execution trace
+```
+
+# Task 9 — Final Productization, Persistence & UI
+
+## Starting state
+
+- Commit: `b201312 feat: add agentic GEO workflow`
+- Working tree: clean
+- Backend suite: 217 passing tests
+
+## Goal
+
+Connect the completed agentic workflow to PostgreSQL persistence, a safe audit API, immutable reruns with deterministic deltas, and a recruiter-facing Next.js UI without adding new AI reasoning.
+
+## Implementation
+
+- Added `psycopg[binary]==3.3.4` and an idempotent PostgreSQL migration for a compact indexed `audits` table with JSONB snapshots.
+- Added strict audit request, record, persisted-result, and delta schemas.
+- Added an injectable audit repository, parameterized PostgreSQL implementation, safe result projection, audit service, failure classification, and deterministic metric/gap comparison.
+- Added `POST /audits`, `GET /audits/{audit_id}`, and `POST /audits/{audit_id}/rerun` while preserving database-independent `/health` behavior.
+- Added explicit CORS and frontend API-base environment configuration.
+- Replaced the frontend placeholder with real New Audit, Audit Overview, Query Explorer, and Experiments & Progress experiences.
+- Added typed runtime fetching, explicit loading/failure/unavailable/empty states, safe external links, and no production mock data.
+- Added four focused frontend tests and seven focused backend product tests.
+
+## Verification
+
+- `python -m pip install -r requirements-dev.txt` — passed; installed psycopg 3.3.4 and its binary package.
+- Focused backend suite — 7 passed.
+- Complete backend suite — 224 passed.
+- `python -m pip check` — passed with no broken requirements.
+- `python -m compileall -q main.py api agents db graph guardrails providers repositories schemas services tests` — passed.
+- `npm.cmd install` — passed; 97 packages added, 456 audited, and 0 vulnerabilities reported.
+- `npm.cmd run lint` — passed.
+- `npm.cmd run test` — passed with 4 tests.
+- `npm.cmd run build` — passed; all product routes compiled without live backend credentials.
+
+## Iterations / failures
+
+- The first focused backend run failed because no async Pytest plugin is installed. Tests were changed to the repository's existing `asyncio.run` convention and passed.
+- The first frontend build failed because the starter TypeScript configuration lacked the `@/*` alias. The alias was added and lint, tests, and build passed.
+- During the initial Task 9 verification, Gemini and Tavily were configured locally but `DATABASE_URL` was absent, so PostgreSQL migration and persistence smoke testing were not attempted at that stage. Neon was subsequently configured and verified as recorded below; no SQLite substitute was introduced.
+
+## Deployment status
+
+The repository is configuration-ready for Neon, Render, and Vercel, but no cloud deployment was performed or claimed.
+
+## Final result
+
+The initial implementation satisfied the acceptance criteria verifiable before database configuration. Subsequent human-review verification configured Neon and exercised the real persistence and API paths, as recorded below.
+
+### Human Review Hardening
+
+Human review after the initial green Task 9 implementation confirmed two correctness issues and three report-verification questions.
+
+- `AuditService.run()` had one broad exception boundary around workflow execution and later repository operations. A repository failure during previous-audit lookup or completion could therefore be relabeled as `audit_failed` and trigger an inappropriate second `fail_audit()` write.
+- The boundary was narrowed so workflow/result-projection failures are safely persisted as failed audits, while `AuditRepositoryError` propagates for API classification as `database_unavailable`. Repository lookup/completion failures do not trigger an agent-failure write.
+- Added explicit coverage for positive, negative, and unchanged directions across all five metrics; the reversed improvement semantics for Evidence Gaps; failed-baseline delta absence; timeout, Gemini, and external-search failures; repository failure propagation; immutable reruns; and reused rerun inputs.
+- The Experiments & Progress rerun handler previously swallowed failures. It now clears stale errors, displays the safe API error, stops its loading state, and does not fabricate or navigate to a result. A focused frontend test covers this behavior.
+- Actual repository inspection confirmed the route and component already use the correct `experiments` spelling, the placeholder is `https://linear.app`, and `.env.example` contains plain environment values without Markdown syntax. No correction was required for those report artifacts.
+
+Final human-review correction verification:
+
+- Focused Task 9 backend suite — 20 passed.
+- Complete backend suite — 237 passed.
+- `python -m pip check` — passed with no broken requirements.
+- `python -m compileall` — passed.
+- Frontend lint — passed.
+- Frontend tests — 5 passed.
+- Frontend production build — passed.
+- At this review point, live PostgreSQL/E2E verification had not yet run because `DATABASE_URL` was not configured. Subsequent Neon and application-path verification is recorded below.
+
+#### Windows Psycopg live-verification repair
+
+Subsequent real verification configured Neon successfully. The synchronous migration completed, the public `audits` table was confirmed, and a direct repository write/read smoke test returned `REPOSITORY_OK True running https://example.com` when it was manually run under a Windows SelectorEventLoop.
+
+The normal Windows Uvicorn command still produced `database_unavailable` for `POST /audits` even though `GET /health` returned 200. The confirmed root cause was Psycopg `AsyncConnection` rejecting Windows' default ProactorEventLoop.
+
+The production repository was repaired without changing its asynchronous protocol: short synchronous `psycopg.connect()` operations now execute through `asyncio.to_thread()`. This keeps blocking database work off FastAPI's event loop, works with the normal Windows Uvicorn runtime and Render/Linux, preserves parameterized SQL and connection transaction cleanup, and retains `AuditRepositoryError` as the sanitized database boundary.
+
+Focused mocked coverage verifies that public repository methods remain async, work is dispatched through the thread boundary, rows remain Pydantic-validated, cursor and connection contexts clean up normally, update semantics remain intact, and Psycopg errors do not reveal connection credentials.
+
+Post-repair verification: 24 focused Task 9 tests passed, the complete backend suite passed with 241 tests, `pip check` reported no broken requirements, and `compileall` passed.
+
+A subsequent FastAPI-to-Neon E2E rerun is recorded below.
+
+#### Final failed-audit visual review
+
+Human visual review confirmed that failed audits render the safe provider failure without fabricated metrics, but the page offered no recovery action. The failed overview now provides a primary `Try Again` action through the existing immutable rerun endpoint and a secondary `Start New Audit` link. Reruns disable the action while pending, navigate to the newly created audit ID on success, and retain a visible safe error on failure.
+
+Inspection of the failed state and shared desktop layout found no actual horizontal-overflow source: the shell is bounded to the viewport with border-box sizing, the failed card has a bounded maximum width, and the topbar content remains within its padded flex container. No global overflow suppression or unrelated layout change was added.
+
+Frontend verification after this correction: lint passed, 6 tests passed, and the production build passed.
+
+#### Final FastAPI-to-Neon E2E verification
+
+After the Windows Psycopg repository repair, the normal local Uvicorn runtime started successfully and `GET /health` returned 200.
+
+A real AnswerLens audit was submitted through the frontend/API using:
+
+- Target: `https://linear.app`
+- Category: `Project Management Software`
+- Known competitors: Jira, Asana, ClickUp
+
+The request reached the real audit workflow and PostgreSQL persistence successfully. Gemini was unable to complete the audit, so the API returned the explicit `gemini_unavailable` failure rather than fabricating downstream results.
+
+The failed audit received a persisted UUID. A subsequent `GET /audits/{id}` returned 200 with the persisted failed state.
+
+The Next.js frontend loaded the saved audit and displayed:
+
+- Explicit failed status
+- Safe Gemini-unavailable message
+- No fabricated metrics, queries, gaps, or experiments
+- `Try Again` recovery action
+- `Start New Audit` action
+
+This verifies the real FastAPI → Neon persistence → Task 8 workflow → provider failure → persisted failed audit → Next.js rendering path.
+
+A fully provider-backed completed audit is not claimed from this run. Live external-provider throughput depends on the quotas and availability of the configured provider projects.
+
+#### Final production-readiness verification
+
+- The real Neon migration completed, the public `audits` table was confirmed, and real PostgreSQL repository write/read behavior was verified.
+- The normal FastAPI runtime and `GET /health` worked, and the real frontend → API → persistence path was exercised successfully.
+- A direct Gemini 3.6 Flash smoke test returned `GEMINI_OK`, confirming real provider connectivity.
+- Server-side diagnostics safely identify workflow stages and external-provider conditions without exposing credentials, raw provider payloads, or internal details.
+- A real Gemini HTTP 429 was identified as external provider quota/rate limiting. It now maps to `gemini_rate_limited` with a sanitized public message; other Gemini failures remain safely classified.
+- Provider failures are persisted explicitly and do not produce fabricated metrics, queries, gaps, experiments, or completed results.
+- Successful offline end-to-end integration traverses the real production LangGraph and application path, substituting deterministic providers only at external or nondeterministic boundaries.
+- Successful result projection and persisted completed-audit creation/retrieval are verified deterministically. Immutable rerun and delta behavior remains covered.
+- Focused offline E2E and Task 9 verification passed.
+- Complete backend suite: 246 passed.
+- `python -m pip check`: passed.
+- `python -m compileall`: passed.
+- Frontend lint: passed.
+- Frontend tests: 6 passed.
+- Frontend production build: passed.
+- `git diff --check`: passed except for normal Windows LF/CRLF conversion notices.
+
+AnswerLens's production application path, persistence, API behavior, agent orchestration, grounding rules, deterministic metrics, rerun logic, and frontend states are verified. Live external-provider throughput remains subject to the quotas and availability of the configured Gemini and Tavily projects.
+
+## Human Review
+
+- [x] Persistence and audit API reviewed.
+- [x] Baseline/rerun/delta behavior reviewed.
+- [x] Frontend product experience reviewed.
+- [x] Backend and frontend verification reviewed.
+- [x] Live database/E2E status reviewed.
+- [x] Repository diff reviewed before commit.

@@ -41,6 +41,7 @@ from schemas.machine_readable import MachineReadableAudit
 from schemas.query import QueryEvaluationSet, RecommendationQuerySet
 from schemas.research import ExternalResearchBatch, ResearchStatus
 from services.crawler import crawl_website
+from services.diagnostics import diagnostic_node
 from services.machine_readable import inspect_machine_readable_surfaces
 from services.metrics import calculate_audit_metrics
 from services.search import research_queries
@@ -417,21 +418,21 @@ def build_agentic_audit_graph(
         }
 
     graph = StateGraph(AuditState)
-    graph.add_node("validate_target", validate_target)
-    graph.add_node("crawl_evidence", crawl_evidence)
-    graph.add_node("inspect_machine_readable_surfaces", inspect_surfaces)
-    graph.add_node("extract_brand_profile", extract_profile)
-    graph.add_node("build_claim_evidence_map", map_claims)
-    graph.add_node("generate_recommendation_queries", generate_queries)
-    graph.add_node("retrieve_external_evidence", retrieve_external)
-    graph.add_node("run_grounded_query_evaluations", evaluate_queries)
-    graph.add_node("plan_targeted_research", plan_research)
-    graph.add_node("retrieve_more_evidence", retrieve_more)
-    graph.add_node("re_evaluate_changed_queries", re_evaluate)
-    graph.add_node("diagnose_evidence_gaps", diagnose_gaps)
-    graph.add_node("generate_geo_experiments", generate_experiments)
-    graph.add_node("calculate_metrics", calculate_metrics)
-    graph.add_node("complete_execution_trace", complete_trace)
+    graph.add_node("validate_target", diagnostic_node("validate_target", validate_target))
+    graph.add_node("crawl_evidence", diagnostic_node("crawl_evidence", crawl_evidence))
+    graph.add_node("inspect_machine_readable_surfaces", diagnostic_node("inspect_machine_readable_surfaces", inspect_surfaces))
+    graph.add_node("extract_brand_profile", diagnostic_node("extract_brand_profile", extract_profile))
+    graph.add_node("build_claim_evidence_map", diagnostic_node("build_claim_evidence_map", map_claims))
+    graph.add_node("generate_recommendation_queries", diagnostic_node("generate_recommendation_queries", generate_queries))
+    graph.add_node("retrieve_external_evidence", diagnostic_node("retrieve_external_evidence", retrieve_external))
+    graph.add_node("run_grounded_query_evaluations", diagnostic_node("run_grounded_query_evaluations", evaluate_queries))
+    graph.add_node("plan_targeted_research", diagnostic_node("plan_targeted_research", plan_research))
+    graph.add_node("retrieve_more_evidence", diagnostic_node("retrieve_more_evidence", retrieve_more))
+    graph.add_node("re_evaluate_changed_queries", diagnostic_node("re_evaluate_changed_queries", re_evaluate))
+    graph.add_node("diagnose_evidence_gaps", diagnostic_node("diagnose_evidence_gaps", diagnose_gaps))
+    graph.add_node("generate_geo_experiments", diagnostic_node("generate_geo_experiments", generate_experiments))
+    graph.add_node("calculate_metrics", diagnostic_node("calculate_metrics", calculate_metrics))
+    graph.add_node("complete_execution_trace", diagnostic_node("complete_execution_trace", complete_trace))
 
     graph.add_edge(START, "validate_target")
     graph.add_edge("validate_target", "crawl_evidence")
