@@ -857,3 +857,64 @@ The stage intentionally does not yet perform autonomous follow-up research. Lang
 - [x] Retrieval-failure semantics reviewed.
 - [x] Focused and complete backend test results reviewed.
 - [x] Repository diff reviewed before commit.
+
+# Task 8 — Real Agentic GEO Backend
+
+## Goal
+
+Turn the deterministic and AI-assisted stages built through Task 7 into one real bounded AnswerLens agentic workflow using LangGraph.
+
+Task 8 adds:
+
+- real LangGraph orchestration
+- deterministic confidence-based routing
+- autonomous targeted evidence research
+- selective query re-evaluation
+- Evidence Gap diagnosis
+- measurable GEO experiments
+- deterministic metrics
+- application-owned execution tracing
+- real Gemini provider verification
+
+Persistence, audit APIs, baseline/rerun history, frontend integration, and deployment remain deferred to Task 9.
+
+## Initial State
+
+Task 8 began from:
+
+`67bfad7 feat: add external GEO intelligence`
+
+The backend suite initially contained:
+
+`192 passing tests`
+
+## Implementation
+
+### LangGraph Workflow
+
+Added `langgraph==1.2.9`.
+
+Implemented the real workflow in:
+
+`backend/graph/workflow.py`
+
+using `StateGraph`, `START`, `END`, normal edges, and conditional routing.
+
+The graph runs:
+
+```text
+validate_target
+→ crawl_evidence
+→ inspect_machine_readable_surfaces
+→ extract_brand_profile
+→ build_claim_evidence_map
+→ generate_recommendation_queries
+→ retrieve_external_evidence
+→ run_grounded_query_evaluations
+→ conditional confidence route
+→ optional targeted research
+→ selective re-evaluation
+→ diagnose_evidence_gaps
+→ generate_geo_experiments
+→ calculate_metrics
+→ complete execution trace

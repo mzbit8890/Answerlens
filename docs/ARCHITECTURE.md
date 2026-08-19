@@ -1,6 +1,6 @@
 # Architecture
 
-AnswerLens uses a Next.js frontend and a FastAPI backend. The backend currently provides a health endpoint, secure bounded website crawling, deterministic machine-readable surface inspection, strict brand/evidence domain contracts, a typed Gemini structured-output provider, bounded Brand Intelligence and Claim Evidence Map agents, and a bounded external GEO intelligence layer for recommendation-query generation, Tavily evidence retrieval, competitor evidence discovery, and grounded query-readiness evaluation.
+AnswerLens uses a Next.js frontend and a FastAPI backend. The backend currently provides a health endpoint, secure bounded website crawling, deterministic machine-readable surface inspection, strict brand/evidence domain contracts, a typed Gemini structured-output provider, bounded Brand Intelligence and Claim Evidence Map agents, bounded external GEO intelligence through Tavily, and a real LangGraph agentic workflow with conditional evidence research, grounded evidence-gap diagnosis, measurable GEO experiments, deterministic metrics, and application-owned execution tracing.
 
 ## Website crawler
 
@@ -27,8 +27,11 @@ Externally injected HTTPX clients are retained only as a caller-controlled test 
 ## Crawl limits
 
 - Maximum returned pages: 8
+
 - Per-request timeout: 10 seconds
+
 - Maximum response body: 2,000,000 bytes, enforced from both `Content-Length` and streamed bytes
+
 - Maximum redirects per page: 5
 
 URLs are normalized before queueing and tracked in queued and visited sets, preventing duplicate pages from consuming crawl capacity.
@@ -66,14 +69,23 @@ JSON-LD is reused from successful crawl pages without refetching them. Bounded i
 ### Machine-readable limits
 
 - Maximum robots body: 256,000 bytes
+
 - Maximum retained robots sitemap directives: 10
+
 - Maximum sitemap body per document: 2,000,000 bytes
+
 - Maximum sitemap documents: 5
+
 - Maximum retained sitemap page URLs: 500
+
 - Maximum `llms.txt` body: 512,000 bytes
+
 - Maximum retained `llms.txt` links: 100
+
 - Maximum structured-data items: 500
+
 - Maximum structured-data traversal depth: 20
+
 - Maximum structured-data dictionary/list nodes visited: 5,000
 
 ## Core brand and evidence domain contracts
@@ -89,22 +101,32 @@ JSON-LD is reused from successful crawl pages without refetching them. Bounded i
 Every Task 3 model rejects unknown fields, trims surrounding string whitespace, rejects empty important strings, and uses default factories for lists. Output is bounded as follows:
 
 - Audiences per profile: 10
+
 - Capabilities per profile: 20
+
 - Use cases per profile: 15
+
 - Candidate claims per profile: 30
+
 - Evidence references per claim: 10
+
 - Brand name and category: 200 characters each
+
 - Audience entries: 200 characters
+
 - Capability and use-case entries: 300 characters
+
 - Positioning and evidence excerpts: 2,000 characters
+
 - Claim statements and confidence reasons: 1,000 characters
+
 - Evidence URLs: 2,048 characters
 
 ## Gemini structured-output provider
 
 `backend/providers/base.py` defines the application-facing asynchronous `StructuredOutputProvider` contract. Callers provide a prompt and an application-owned Pydantic response model and receive that validated model rather than an untyped dictionary.
 
-`backend/providers/gemini.py` implements this contract using the official Google Gen AI SDK and the project-selected `gemini-2.5-flash` model. Real provider construction reads `GEMINI_API_KEY` from the environment. Tests and other controlled callers can inject a client so automated verification requires neither credentials nor network access.
+`backend/providers/gemini.py` implements this contract using the official Google Gen AI SDK and the project-selected `gemini-3.6-flash` model. Real provider construction reads `GEMINI_API_KEY` from the environment. Tests and other controlled callers can inject a client so automated verification requires neither credentials nor network access.
 
 The provider requests `application/json` structured output and supplies the caller-provided Pydantic model as Gemini's response schema. Returned response text is still validated again with the same application-owned Pydantic model using `model_validate_json()`. Empty, malformed, schema-invalid, or unexpected-extra-field output therefore cannot silently become valid application data.
 
@@ -117,9 +139,14 @@ The Gemini provider layer does not contain Brand Intelligence prompts, crawler-e
 ### Gemini provider dependencies
 
 - `google-genai==2.18.1`
+
 - `pydantic==2.12.5`
-- Model: `gemini-2.5-flash`
+
+- Model: `gemini-3.6-flash`
+
 - Maximum structured-output attempts: 2
+
+Gemini 3.6 Flash structured-output requests use the SDK's `response_json_schema` configuration. Because Gemini's response-schema API does not accept every keyword emitted by strict Pydantic JSON Schema, the provider removes unsupported `additionalProperties` entries only from the API-facing schema representation. This does not weaken the application contract: returned JSON is still validated using the original strict Pydantic response model with `model_validate_json()`, so unexpected fields and other schema violations remain rejected by AnswerLens.
 
 ## Brand Intelligence Agent
 
@@ -140,14 +167,23 @@ Candidate `BrandClaim` values generated at this stage remain unverified proposit
 ### Brand Intelligence evidence limits
 
 - Maximum successful website pages included: 8
+
 - Maximum readable content per page: 4,000 characters
+
 - Maximum headings per page: 12
+
 - Maximum characters per heading: 200
+
 - Maximum meta-description length: 500 characters
+
 - Maximum `llms.txt` title length: 300 characters
+
 - Maximum `llms.txt` summary length: 1,000 characters
+
 - Maximum structured-data types included: 40
+
 - Maximum total prepared evidence length: 40,000 characters
+
 - Optional category length follows the existing domain-schema category bound
 
 Evidence truncation is deterministic. The agent performs no preliminary LLM summarization and no random evidence sampling.
@@ -173,16 +209,27 @@ Schema-valid outputs that violate application grounding invariants may be retrie
 ### Claim Evidence Map limits
 
 - Maximum successful website pages considered: 8
+
 - Maximum readable content per page: 4,000 characters
+
 - Maximum headings per page: 12
+
 - Maximum heading length: 200 characters
+
 - Maximum meta-description length: 500 characters
+
 - Maximum `llms.txt` title length: 300 characters
+
 - Maximum `llms.txt` summary length: 1,000 characters
+
 - Maximum structured-data observations considered: 40
+
 - Maximum structured-data text per observation: 4,000 characters
+
 - Maximum total rendered evidence-source representation: 40,000 characters
+
 - Maximum semantic attempts: 2
+
 - Claim Evidence Map records remain bounded by the existing maximum of 30 candidate brand claims
 
 The 40,000-character evidence bound is applied to the actual rendered JSON-encoded source representation, not only to raw source text. Deterministic prefix fitting ensures that JSON escaping cannot cause the final evidence prompt section to exceed the configured bound.
@@ -194,18 +241,31 @@ Task 7 adds the bounded external GEO intelligence stage. It connects recommendat
 The application-level flow is:
 
 ```text
+
 BrandProfile
-    +
+
+    +
+
 ClaimEvidenceMap
-        ↓
+
+        ↓
+
 generate recommendation queries
-        ↓
+
+        ↓
+
 retrieve bounded Tavily evidence
-        ↓
+
+        ↓
+
 validate and classify external sources
-        ↓
+
+        ↓
+
 run grounded query evaluations
-        ↓
+
+        ↓
+
 ExternalGeoEvaluation
 
 ```
@@ -219,9 +279,13 @@ ExternalGeoEvaluation
 Queries are derived from the supplied `BrandProfile` rather than from a fixed template list. The supported intent families are:
 
 - `category_discovery`
+
 - `alternative_comparison`
+
 - `audience_use_case`
+
 - `problem_driven`
+
 - `capability_driven`
 
 The model is asked to prefer approximately 8–12 useful buyer-style queries when the supplied evidence supports that variety. Sparse profiles may legitimately produce fewer queries rather than forcing invented categories, audiences, capabilities, use cases, or competitors.
@@ -243,10 +307,15 @@ The rendered profile context is bounded to 20,000 characters after JSON encoding
 The Tavily search configuration is intentionally constrained:
 
 - Search topic: `general`
+
 - Search depth: `basic`
+
 - Maximum results requested per query: 5
+
 - Tavily-generated answers: disabled
+
 - Raw page content: disabled
+
 - Automatic search-parameter expansion: disabled
 
 AnswerLens uses Tavily as a bounded external retrieval source. Tavily is not used to generate the final GEO judgment, and returned result URLs are not independently crawled or fetched during this stage.
@@ -260,10 +329,15 @@ At most three Tavily searches execute concurrently, while the returned research 
 Each retained Tavily result preserves:
 
 - normalized URL
+
 - normalized host/domain
+
 - bounded title
+
 - bounded Tavily content
+
 - deterministic source ownership
+
 - optional Tavily relevance metadata
 
 Result URLs reuse the non-resolving URL-reference safety boundary. Only HTTP/HTTPS references are retained. Malformed URLs, credential-bearing URLs, localhost names, literal non-global/private IP references, and other invalid references are discarded without DNS resolution or fetching.
@@ -273,6 +347,7 @@ Results are deduplicated deterministically by normalized URL and limited to five
 Source ownership is classified deterministically from the audited target scope:
 
 - `brand_owned` for the audited website/same-site scope
+
 - `independent` for other valid external domains
 
 A third-party source is not classified as brand-owned merely because its content mentions the brand.
@@ -288,9 +363,13 @@ Malformed Tavily response structures are treated as provider failures rather tha
 Evaluation input may contain:
 
 - the exact `RecommendationQuery`
+
 - bounded `BrandProfile` context
+
 - the existing local `ClaimEvidenceMap`
+
 - validated Tavily results for that query
+
 - optional known-competitor hints
 
 Local Task 6 claim evidence remains publisher-context evidence and is not relabeled as independent external evidence.
@@ -298,18 +377,27 @@ Local Task 6 claim evidence remains publisher-context evidence and is not relabe
 The Task 7 `QueryEvaluation` contract represents:
 
 - exact query text
+
 - evaluation status
+
 - readiness
+
 - supporting external evidence
+
 - missing evidence
+
 - competitor evidence
+
 - confidence
+
 - human-readable reason
 
 Readiness is qualitative:
 
 - `low`
+
 - `medium`
+
 - `high`
 
 It represents evidence readiness for the supplied recommendation intent. It is not a product-quality score, market rank, answer-engine ranking probability, mention probability, or citation probability.
@@ -327,7 +415,9 @@ Gemini output is not trusted merely because it satisfies the Pydantic schema.
 For each supporting external evidence reference, application-side validation requires:
 
 1. the URL to exist in the validated Tavily catalog for that exact query
+
 2. the returned source ownership to match the deterministic catalog classification
+
 3. the whitespace-normalized excerpt to occur in the bounded source title/content representation
 
 Unknown or fabricated URLs and fabricated/paraphrased excerpts that cannot be grounded in the supplied source are rejected.
@@ -351,20 +441,289 @@ Prepared external source rendering is bounded to 30,000 characters and applicati
 ### Task 7 Limits
 
 - Maximum recommendation queries: 12
+
 - Maximum Tavily results per query: 5
+
 - Maximum concurrent searches: 3
+
 - Maximum known competitors supplied to query generation: 10
+
 - Maximum query length: 500 characters
+
 - Maximum query rationale: 1,000 characters
+
 - Maximum Tavily title retained: 500 characters
+
 - Maximum Tavily content retained per result: 4,000 characters
+
 - Maximum external evidence references per evaluation: 10
+
 - Maximum missing-evidence entries per evaluation: 10
+
 - Maximum competitor-evidence entries per evaluation: 10
+
 - Maximum competitor-name length: 200 characters
+
 - Maximum evaluation reason: 2,000 characters
+
 - Maximum rendered external-source context: 30,000 characters
+
 - Maximum rendered application context: 20,000 characters
+
 - Maximum semantic evaluation attempts: 2
 
-Task 7 intentionally does not implement LangGraph, confidence-based research routing, follow-up Tavily searches, Evidence Gap diagnosis, GEO experiments, metrics, execution tracing, database persistence, audit APIs, or frontend audit screens. Those remain later workflow/product layers.
+Task 7 intentionally did not implement LangGraph, confidence-based research routing, follow-up Tavily searches, Evidence Gap diagnosis, GEO experiments, metrics, execution tracing, database persistence, audit APIs, or frontend audit screens. The agentic workflow features were added in Task 8; persistence, audit APIs, and frontend product integration remain Task 9.
+
+## Agentic GEO Workflow
+
+Task 8 turns the previously independent evidence stages into a real bounded LangGraph workflow.
+
+`backend/graph/workflow.py` owns orchestration using `StateGraph`, `START`, `END`, deterministic edges, and conditional research routing.
+
+The implemented flow is:
+
+```text
+
+START
+
+  ↓
+
+validate_target
+
+  ↓
+
+crawl_evidence
+
+  ↓
+
+inspect_machine_readable_surfaces
+
+  ↓
+
+extract_brand_profile
+
+  ↓
+
+build_claim_evidence_map
+
+  ↓
+
+generate_recommendation_queries
+
+  ↓
+
+retrieve_external_evidence
+
+  ↓
+
+run_grounded_query_evaluations
+
+  ↓
+
+enough_confidence?
+
+  ├── research needed
+
+  │      ↓
+
+  │   plan_targeted_research
+
+  │      ↓
+
+  │   retrieve_more_evidence
+
+  │      ↓
+
+  │   re_evaluate_changed_queries
+
+  │      ↓
+
+  │   enough_confidence?
+
+  │
+
+  └── research complete
+
+         ↓
+
+      diagnose_evidence_gaps
+
+         ↓
+
+      generate_geo_experiments
+
+         ↓
+
+      calculate_metrics
+
+         ↓
+
+      complete_execution_trace
+
+         ↓
+
+        END
+
+```
+
+The graph reuses the existing crawler, machine-readable inspector, Brand Intelligence Agent, Claim Evidence Map, Query Intelligence Agent, Tavily search boundary, and grounded evaluation layer. Those implementations are not duplicated inside graph nodes.
+
+### Confidence-Based Research Routing
+
+Autonomous research is controlled by deterministic application logic rather than by Gemini.
+
+A query becomes a follow-up research candidate only when its evaluation:
+
+- completed successfully
+
+- has `low` confidence
+
+`medium` and `high` confidence satisfy the workflow confidence threshold.
+
+Readiness and confidence intentionally have different meanings. A `low` readiness / `high` confidence evaluation means AnswerLens has enough evidence to confidently conclude that the brand is weak for that recommendation intent; further searching is not automatically justified. A `low` confidence evaluation means the evidence is insufficient to make a confident classification and may trigger additional research.
+
+Unavailable evaluations caused by provider or retrieval failures do not enter the evidence-research loop.
+
+Autonomous research is capped at two additional rounds.
+
+### Targeted Research
+
+`backend/agents/research_agent.py` generates one bounded targeted search plan for each current low-confidence candidate.
+
+Research planning uses the original recommendation query, the current evaluation, its missing-evidence statements, and bounded `BrandProfile` context. All supplied values remain untrusted data.
+
+The planner must preserve exact candidate-query identity and cannot introduce research plans for non-candidates.
+
+Additional retrieval reuses the existing `SearchProvider` and Tavily implementation.
+
+New evidence is normalized, URL-validated, deduplicated, merged deterministically with the query's existing evidence, and limited to five retained results.
+
+When more than five valid results are available, results with Tavily relevance scores are preferred, then sorted by descending score with stable original ordering as a tie-breaker.
+
+Only recommendation queries whose retained evidence catalogs changed are re-evaluated.
+
+Provider failures and no-change research remain explicit rather than being converted into fake evidence or generic API-retry loops.
+
+### Evidence Gap Agent
+
+`backend/agents/gap_agent.py` diagnoses evidence gaps after autonomous research terminates.
+
+Evidence gaps are produced for completed `low` and `medium` readiness evaluations. High-readiness and unavailable evaluations are excluded.
+
+Each gap preserves its exact recommendation query and readiness.
+
+Application-side validation requires:
+
+- supporting source references to already exist in that exact query evaluation
+
+- competitor evidence to exactly reuse grounded competitor records
+
+- every missing-evidence statement to reuse an existing missing-evidence statement from the same query evaluation after conservative whitespace normalization
+
+The Gap Agent therefore explains grounded evidence state rather than inventing new evidence propositions or proprietary answer-engine behavior.
+
+### GEO Experiment Agent
+
+`backend/agents/experiment_agent.py` converts validated evidence gaps into bounded measurable GEO experiments.
+
+Every experiment contains:
+
+```text
+Observation
+→ Hypothesis
+→ Proposed Change
+→ Evaluation Queries
+→ Success Condition
+```
+
+Experiment evaluation queries must already exist in the audit and must map to validated evidence gaps.
+
+Experiments cannot introduce fabricated URLs, unsupported competitor claims, new recommendation queries, ranking probabilities, or guaranteed outcomes.
+
+When no evidence gaps exist, no experiment-generation request is made.
+
+When one or more validated gaps exist, at least one valid experiment is required. The total experiment count is capped at six.
+
+### Deterministic Metrics
+
+`backend/services/metrics.py` calculates five application-owned metrics without Gemini:
+
+- Evidence Coverage
+
+- Query Readiness
+
+- Strong Queries
+
+- Evidence Gaps
+
+- External Evidence Diversity
+
+Evidence Coverage is the percentage of claim-evidence records classified as supported.
+
+Query Readiness maps completed query evaluations as:
+
+- low = 0
+
+- medium = 0.5
+
+- high = 1
+
+and averages those values as a percentage. Unavailable evaluations are excluded from the readiness denominator and remain separately counted.
+
+Strong Queries counts completed high-readiness evaluations.
+
+Evidence Gaps counts validated Evidence Gap records.
+
+External Evidence Diversity counts unique independent domains actually referenced by supporting evidence in completed evaluations. Brand-owned sources and unused external search results are excluded.
+
+These metrics are evidence-readiness measurements. They are not ChatGPT scores, mention probabilities, citation probabilities, ranking probabilities, or proprietary answer-engine measurements.
+
+### Execution Trace
+
+The workflow produces an application-owned bounded execution trace rather than relying only on LangGraph internal diagnostics.
+
+Trace events cover target validation, crawling, machine-readable inspection, brand extraction, claim mapping, query generation, initial external research, grounded evaluation, optional research rounds, selective re-evaluation, gap diagnosis, experiment generation, metric calculation, and audit completion.
+
+Events contain bounded stage names, statuses, messages, durations, and numeric counters. They do not contain secrets, full prompts, source bodies, raw API payloads, or provider objects.
+
+### Task 8 Runtime and Limits
+
+- LangGraph: `1.2.9`
+
+- Gemini model: `gemini-3.6-flash`
+
+- Google Gen AI SDK: `2.18.1`
+
+- Local environment loading: `python-dotenv==1.2.3`
+
+- Maximum crawl pages: 8
+
+- Maximum recommendation queries: 12
+
+- Maximum retained results per query: 5
+
+- Maximum additional research rounds: 2
+
+- Maximum GEO experiments: 6
+
+- Global agentic-audit timeout: 120 seconds
+
+- Gemini structured-output attempts remain bounded
+
+- New Gemini calls remain sequential rather than uncontrolled concurrent fan-out
+
+`run_agentic_audit()` enforces the global timeout around the complete LangGraph execution.
+
+Provider dependencies are injected into the workflow and are not stored as audit state.
+
+### Task 8 Live Verification Boundary
+
+A real structured-output request through `GeminiStructuredOutputProvider` succeeded using `gemini-3.6-flash` and validated a Pydantic `LiveCheck` response containing `GEMINI_OK`.
+
+A subsequent bounded full audit against `https://linear.app\` reached the real Gemini Brand Intelligence stage but Google returned HTTP 503 `UNAVAILABLE` because the model was experiencing temporary high demand.
+
+No complete live audit metrics were fabricated from that interrupted run.
+
+The external 503 remained an explicit provider failure and production security, grounding rules, retry limits, and model configuration were not weakened to bypass it.
+
+Task 8 intentionally does not implement PostgreSQL/Neon persistence, audit APIs, baseline/rerun comparison, frontend audit screens, or deployment. Those remain Task 9.

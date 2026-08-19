@@ -84,11 +84,31 @@ def test_request_uses_configured_model_json_mime_and_requested_schema() -> None:
     generate(provider)
 
     call = client.models.calls[0]
-    assert call["model"] == GEMINI_MODEL == "gemini-2.5-flash"
+    assert call["model"] == GEMINI_MODEL == "gemini-3.6-flash"
     assert call["contents"] == "Return the requested structured test object."
     config = call["config"]
     assert config.response_mime_type == "application/json"
-    assert config.response_schema is StructuredTestOutput
+    assert config.response_json_schema["type"] == "object"
+    assert config.response_json_schema["properties"] == StructuredTestOutput.model_json_schema()[
+        "properties"
+    ]
+    assert "additionalProperties" not in config.response_json_schema
+
+
+def test_gemini_schema_removes_unsupported_additional_properties_only() -> None:
+    client = FakeClient(
+        [
+            '{"brand":"Example","category":null,"audiences":[],"capabilities":[],'
+            '"use_cases":[],"positioning":null,"claims":[]}'
+        ]
+    )
+    provider = GeminiStructuredOutputProvider(client=client)
+
+    result = generate(provider, BrandProfile)
+
+    schema_text = str(client.models.calls[0]["config"].response_json_schema)
+    assert "additionalProperties" not in schema_text
+    assert result == BrandProfile(brand="Example")
 
 
 @pytest.mark.parametrize(

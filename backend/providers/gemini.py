@@ -7,7 +7,7 @@ from pydantic import BaseModel, ValidationError
 
 from providers.base import OutputModelT
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.6-flash"
 MAX_STRUCTURED_OUTPUT_ATTEMPTS = 2
 
 
@@ -25,6 +25,19 @@ class GeminiRequestError(GeminiProviderError):
 
 class GeminiStructuredOutputError(GeminiProviderError):
     """Gemini output remained invalid after the bounded attempts."""
+
+
+def _gemini_compatible_schema(value: Any) -> Any:
+    """Remove JSON Schema keywords unsupported by Gemini's response schema API."""
+    if isinstance(value, dict):
+        return {
+            key: _gemini_compatible_schema(item)
+            for key, item in value.items()
+            if key != "additionalProperties"
+        }
+    if isinstance(value, list):
+        return [_gemini_compatible_schema(item) for item in value]
+    return value
 
 
 class GeminiStructuredOutputProvider:
@@ -52,7 +65,9 @@ class GeminiStructuredOutputProvider:
     ) -> OutputModelT:
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=response_model,
+            response_json_schema=_gemini_compatible_schema(
+                response_model.model_json_schema()
+            ),
         )
         last_output_error: ValueError | ValidationError | None = None
 

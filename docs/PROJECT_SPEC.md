@@ -74,14 +74,12 @@ Example:
 
 # 4. Agent Workflow
 
-The core LangGraph workflow will be:
+The core LangGraph workflow is:
 
 ```text
 START
    ↓
 validate_target
-   ↓
-discover_site
    ↓
 crawl_evidence
    ↓
@@ -98,34 +96,50 @@ retrieve_external_evidence
 run_grounded_query_evaluations
    ↓
 enough_confidence?
-   ├── NO → retrieve_more_evidence
-   │           ↓
-   │        re-evaluate
-   │           ↓
-   │     max 2 retries
+   ├── NO
+   │     ↓
+   │  plan_targeted_research
+   │     ↓
+   │  retrieve_more_evidence
+   │     ↓
+   │  re_evaluate_changed_queries
+   │     ↓
+   │  enough_confidence?
+   │     ↓
+   │  max 2 additional research rounds
    │
-   └── YES
-        ↓
-diagnose_evidence_gaps
-        ↓
-generate_experiments
-        ↓
-calculate_metrics
-        ↓
-save_audit
-        ↓
-compare_previous_audit
-        ↓
-END
+   └── YES / research limit reached
+         ↓
+      diagnose_evidence_gaps
+         ↓
+      generate_experiments
+         ↓
+      calculate_metrics
+         ↓
+      complete_execution_trace
+         ↓
+      save_audit
+         ↓
+      compare_previous_audit
+         ↓
+        END
+
 ```
+
+Website discovery is handled inside the bounded crawl stage rather than represented as a separate LangGraph node.
+
+The confidence decision is application-owned. Completed evaluations with low confidence may trigger additional evidence gathering; medium/high confidence stops research regardless of readiness. Provider-unavailable evaluations do not enter the evidence-research loop.
+
+`save_audit` and `compare_previous_audit` are completed in the final persistence/product stage.
 
 This is a real conditional agent workflow rather than a fixed sequence of LLM calls.
 
 ---
 
+
 # 5. Website Crawler
 
-AnswerLens will crawl approximately **5–10 useful pages**, not the entire website.
+AnswerLens will crawl up to **8 useful pages**, not the entire website.
 
 Prioritize:
 
@@ -369,7 +383,7 @@ AnswerLens measures **evidence readiness**, not proprietary model ranking probab
 
 # 12. Autonomous Evidence-Gathering Loop
 
-The agent cannot immediately make a recommendation when evidence is weak.
+The agent does not automatically gather more evidence merely because readiness is low. Additional research is triggered when evaluation confidence is insufficient.
 
 If confidence is below the threshold:
 
@@ -656,6 +670,8 @@ MAX_RESULTS_PER_QUERY = 5
 
 MAX_RESEARCH_RETRIES = 2
 
+MAX_EXPERIMENTS = 6
+
 AUDIT_TIMEOUT = 120 seconds
 ```
 
@@ -746,7 +762,7 @@ Use Next.js Route Handlers / server-side Node runtime as the frontend/backend bo
 
 ## LLM
 
-**Gemini 2.5 Flash**
+**Gemini 3.6 Flash**
 
 ## Search
 
