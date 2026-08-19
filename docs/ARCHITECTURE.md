@@ -151,3 +151,38 @@ Candidate `BrandClaim` values generated at this stage remain unverified proposit
 - Optional category length follows the existing domain-schema category bound
 
 Evidence truncation is deterministic. The agent performs no preliminary LLM summarization and no random evidence sampling.
+
+## Claim Evidence Map Agent
+
+`backend/agents/evidence_agent.py` implements the local Claim Evidence Map stage. It consumes an existing `BrandProfile`, `CrawlResult`, `MachineReadableAudit`, and injected `StructuredOutputProvider`, and returns the application-owned `ClaimEvidenceMap` contract.
+
+The agent performs no crawling, DNS resolution, Tavily retrieval, external search, or direct Gemini configuration. It works only from evidence already collected by earlier stages.
+
+The local evidence catalog includes successful crawled webpages, present `llms.txt` observations, and retained publisher structured-data observations. Failed crawl pages are excluded. Robots and sitemap status are not treated as claim evidence.
+
+Each evidence source preserves its URL, explicit source type, and bounded source text. Source text is JSON-encoded before insertion into the model prompt and explicitly labeled as untrusted data so instruction-like strings or prompt delimiters appearing inside publisher content remain data rather than prompt structure.
+
+The model must return exactly one `ClaimEvidence` record for every candidate `BrandClaim`, preserving the original claim wording and order. Application-side validation independently enforces this invariant and rejects omitted, added, duplicated, rewritten, or reordered claims.
+
+Evidence references are validated against the prepared local catalog. The evidence URL and source type must match a supplied source, external source types are rejected at this stage, and each normalized evidence excerpt must occur in the corresponding prepared source text. An `assumption` record must contain no evidence.
+
+A `supported` classification means only that the supplied publisher evidence directly and materially supports the proposition. It does not mean AnswerLens independently verified the claim. `insufficient_evidence` represents partial, ambiguous, or incomplete grounding. Confidence describes confidence in the support classification from the supplied evidence; it is not a truth probability, GEO score, ranking probability, mention probability, or citation probability.
+
+Schema-valid outputs that violate application grounding invariants may be retried once, for a maximum of two semantic attempts. Provider/API failures propagate directly rather than entering this semantic-repair loop. If the brand profile contains no claims, the agent returns an empty map without calling the provider. If claims exist but no usable local evidence exists, the stage fails explicitly before provider execution.
+
+### Claim Evidence Map limits
+
+- Maximum successful website pages considered: 8
+- Maximum readable content per page: 4,000 characters
+- Maximum headings per page: 12
+- Maximum heading length: 200 characters
+- Maximum meta-description length: 500 characters
+- Maximum `llms.txt` title length: 300 characters
+- Maximum `llms.txt` summary length: 1,000 characters
+- Maximum structured-data observations considered: 40
+- Maximum structured-data text per observation: 4,000 characters
+- Maximum total rendered evidence-source representation: 40,000 characters
+- Maximum semantic attempts: 2
+- Claim Evidence Map records remain bounded by the existing maximum of 30 candidate brand claims
+
+The 40,000-character evidence bound is applied to the actual rendered JSON-encoded source representation, not only to raw source text. Deterministic prefix fitting ensures that JSON escaping cannot cause the final evidence prompt section to exceed the configured bound.

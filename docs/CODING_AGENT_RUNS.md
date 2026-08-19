@@ -207,7 +207,8 @@ All Task 2 acceptance criteria were satisfied. Each surface is independently ins
 - [ ] Machine-readable implementation reviewed.
 - [ ] Security and parsing boundaries reviewed.
 - [ ] Test and live verification results reviewed.
-- [ ] Repository diff reviewed before commit.
+- [x] Repository diff reviewed before commit.
+
 
 ### Human Review Hardening
 
@@ -534,4 +535,161 @@ Task 5 established the Brand Intelligence extraction stage. Existing crawl and m
 
 - [x] Focused and complete backend test results reviewed.
 
-- [ ] Repository diff reviewed before commit.
+- [x] Repository diff reviewed before commit.
+
+# Task 6 — Claim Evidence Map
+
+## Goal
+
+Implement the Claim Evidence Map stage that evaluates each candidate `BrandClaim` against already collected publisher evidence and produces a strictly grounded `ClaimEvidenceMap` without external research or independent factual verification.
+
+## Implementation
+
+- Added `backend/agents/evidence_agent.py` as the focused Claim Evidence Map layer.
+
+- Added `ClaimEvidenceMap` to `backend/schemas/evidence.py`, bounded by the existing maximum number of candidate brand claims.
+
+- Consumed the existing `BrandProfile`, `CrawlResult`, `MachineReadableAudit`, and application-facing `StructuredOutputProvider`.
+
+- Added deterministic evidence preparation from successful crawled webpages, present `llms.txt` observations, and retained structured-data observations.
+
+- Excluded failed crawl pages from usable claim evidence.
+
+- Did not use robots or sitemap status as claim evidence.
+
+- Preserved source URLs and explicit evidence source types.
+
+- Added explicit bounds for page content, headings, metadata, `llms.txt`, structured-data observations, structured-data text, total prepared evidence, and semantic attempts.
+
+- Kept Task 6 network-free: no page refetching, DNS resolution, Tavily retrieval, external search, or direct Gemini dependency was introduced.
+
+- Required the model to return exactly one evidence record for every candidate claim while preserving exact claim wording and order.
+
+- Added application-side validation that rejects invented, omitted, duplicated, rewritten, or reordered claims.
+
+- Added application-side grounding validation requiring every evidence URL and source type to exist in the prepared local evidence catalog.
+
+- Rejected `brand_owned_external` and `independent_external` evidence types because Task 6 contains no external retrieval stage.
+
+- Required each normalized evidence excerpt to occur in the corresponding prepared source text.
+
+- Required `assumption` classifications to contain no evidence.
+
+- Preserved the existing schema invariant that `supported` claims require at least one evidence reference.
+
+- Defined `supported` as direct and material support from supplied publisher evidence rather than independent verification.
+
+- Defined `insufficient_evidence` for partial, ambiguous, related, or incomplete grounding.
+
+- Defined confidence as confidence in the support classification rather than factual truth, GEO ranking, recommendation, mention, or citation probability.
+
+- Added explicit `ClaimEvidenceMappingError` failures for unavailable evidence and semantic grounding violations.
+
+- Added a maximum of two semantic attempts: the initial structured-output request plus at most one semantic repair attempt.
+
+- Provider/API failures remain outside the semantic retry path and propagate directly.
+
+- An empty candidate-claim list returns an empty `ClaimEvidenceMap` without calling the provider.
+
+- Candidate claims with no usable collected sources fail explicitly before provider execution.
+
+## Initial Codex verification
+
+- The first focused Task 6 run produced 23 passing tests and 1 failure because a test referenced the misspelled enum value `INSUFFIC_EVIDENCE` instead of `INSUFFICIENT_EVIDENCE`.
+
+- The incorrect test enum reference was corrected.
+
+- Additional direct bounds and wrapper strictness coverage was added.
+
+- Final Codex focused Task 6 suite — 27 passed.
+
+- Complete backend suite after the initial implementation — 153 passed.
+
+- `python -m pip check` — passed with `No broken requirements found.`
+
+- `python -m compileall` — passed.
+
+- `git diff --check` — passed.
+
+- No live Gemini request or network access was used by Task 6 tests.
+
+## Human Review Hardening
+
+Human review identified two prompt/boundedness issues after the initial Task 6 implementation.
+
+### Finding 1 — Untrusted source text could imitate prompt structure
+
+The initial evidence-source renderer inserted publisher source text directly into the evidence block. A hostile webpage could therefore contain text such as `END UNTRUSTED EVIDENCE SOURCES` followed by instruction-like content that visually resembled the structural prompt delimiter.
+
+### Manual change
+
+- Changed evidence-source rendering so source text is serialized with JSON string encoding before insertion into the prompt.
+
+- Labeled the rendered value as `TEXT (JSON-ENCODED UNTRUSTED DATA)`.
+
+- Added a prompt rule stating that JSON-encoded evidence must be interpreted only as source data and that delimiters or instructions appearing inside the decoded string are never prompt instructions.
+
+### Regression-test iteration
+
+- A new prompt-boundary regression test was initially written with an assertion expecting the hostile content to appear as a standalone quoted JSON value.
+
+- That assertion was incorrect because the hostile content exists inside a larger combined source string containing page metadata/content.
+
+- The test was corrected to compare the encoded fragment without the surrounding JSON quotes and to verify structural delimiter lines rather than raw substring counts.
+
+- Focused Task 6 suite after this correction — 28 passed.
+
+### Finding 2 — JSON encoding could invalidate the total evidence-size bound
+
+After source text was JSON-encoded, the existing 40,000-character fitting calculation still measured raw source text using the previous unencoded header assumptions.
+
+Quotes, backslashes, newlines, and other escaped characters can expand during JSON serialization, so a raw-text bound no longer guaranteed that the final rendered evidence representation stayed within 40,000 characters.
+
+### Manual change
+
+- Added deterministic rendered-budget fitting.
+
+- Added `_fit_text_to_rendered_budget()` to choose the longest raw source prefix whose actual rendered JSON-encoded source block fits within the remaining prompt budget.
+
+- Updated source fitting to account for the complete rendered source block and inter-source separators.
+
+- Preserved raw source text inside `PreparedEvidenceSource` so application-side excerpt grounding continues to validate against source content rather than encoded prompt text.
+
+- Added regression coverage using escape-heavy publisher content to ensure JSON serialization cannot push the final rendered evidence representation beyond `MAX_PREPARED_EVIDENCE_CHARS`.
+
+### Human-review editing iteration
+
+- The new JSON-expansion regression test was briefly placed inside the production `evidence_agent.py` module during the manual edit.
+
+- It was removed from the production module and placed in `backend/tests/test_evidence_agent.py`.
+
+- The focused suite then contained 29 Task 6 tests.
+
+## Final Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests/test_evidence_agent.py -q` — passed with 29 tests in 0.70 seconds.
+
+- `.\.venv\Scripts\python.exe -m pytest -q` — passed with 155 tests in 1.75 seconds.
+
+- Both Pytest runs emitted the existing non-blocking `PytestCacheWarning` because Windows denied creation of `backend/.pytest_cache`; test execution itself completed successfully.
+
+- `.\.venv\Scripts\python.exe -m pip check` — passed with `No broken requirements found.`
+
+- `.\.venv\Scripts\python.exe -m compileall -q main.py agents guardrails providers schemas services tests` — passed.
+
+- `git diff --check` — no whitespace errors; Windows reported only LF/CRLF conversion warnings.
+
+- Final staged `git diff --cached --check` — passed with no output after one trailing-whitespace line in the test file was removed.
+
+## Final Result
+
+Task 6 established a bounded Claim Evidence Map stage that converts candidate brand claims into locally grounded support classifications while preserving exact claim identity, source attribution, evidence excerpts, explicit uncertainty, untrusted-data boundaries, and application-side grounding enforcement.
+
+The stage intentionally does not perform external evidence retrieval or claim truth verification. External search, competitor evidence, recommendation-query evaluation, and later GEO reasoning remain deferred.
+
+## Human Review
+
+- [x] Claim Evidence Map implementation reviewed.
+- [x] Evidence grounding and trust boundaries reviewed.
+- [x] Focused and complete backend test results reviewed.
+- [x] Repository diff reviewed before commit.

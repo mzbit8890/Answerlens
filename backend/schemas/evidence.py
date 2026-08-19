@@ -11,7 +11,7 @@ from pydantic import (
 )
 
 from guardrails.url_safety import URLSafetyError, validate_url_reference
-from schemas.brand import BrandClaim
+from schemas.brand import MAX_BRAND_CLAIMS, BrandClaim
 
 MAX_EVIDENCE_PER_CLAIM = 10
 MAX_EVIDENCE_URL_LENGTH = 2_048
@@ -95,3 +95,14 @@ class ClaimEvidence(BaseModel):
         if self.support_status is ClaimSupportStatus.SUPPORTED and not self.evidence:
             raise ValueError("supported claims require at least one evidence reference")
         return self
+
+
+class ClaimEvidenceMap(BaseModel):
+    """A bounded mapping containing one record per candidate brand claim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    records: list[ClaimEvidence] = Field(
+        default_factory=list,
+        max_length=MAX_BRAND_CLAIMS,
+    )
