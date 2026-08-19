@@ -693,3 +693,167 @@ The stage intentionally does not perform external evidence retrieval or claim tr
 - [x] Evidence grounding and trust boundaries reviewed.
 - [x] Focused and complete backend test results reviewed.
 - [x] Repository diff reviewed before commit.
+
+# Task 7 — Query Intelligence, Tavily Retrieval & Grounded GEO Evaluation
+
+## Goal
+
+Implement AnswerLens's external GEO intelligence layer by combining recommendation-query generation, bounded Tavily retrieval, external-source classification, competitor evidence discovery, and grounded Gemini query-readiness evaluation without yet implementing LangGraph or the autonomous evidence-research loop.
+
+## Implementation
+
+- Added `backend/schemas/query.py` with strict recommendation-query and query-evaluation contracts.
+- Added `backend/schemas/research.py` with bounded external-search and research-batch contracts.
+- Added `backend/agents/query_agent.py` for BrandProfile-derived recommendation-query generation.
+- Added `backend/agents/evaluation_agent.py` for grounded recommendation-query evaluation.
+- Added `backend/providers/search.py` as the application-facing asynchronous search-provider abstraction.
+- Added `backend/providers/tavily.py` using the official asynchronous Tavily client.
+- Added `backend/services/search.py` for bounded validated external research.
+- Added `backend/services/external_geo.py` as the complete Task 7 application-service orchestration helper.
+- Added `tavily-python==0.7.27` to backend runtime requirements.
+- Added mocked Task 7 tests covering query generation, Tavily integration, external research, source classification, competitor evidence, and grounded evaluation.
+
+### Query Intelligence
+
+- Generates recommendation queries from the actual `BrandProfile`, not a fixed static list.
+- Uses the explicit intent families:
+  - `category_discovery`
+  - `alternative_comparison`
+  - `audience_use_case`
+  - `problem_driven`
+  - `capability_driven`
+- Returns at most 12 queries.
+- Sparse brand profiles may return fewer queries rather than forcing unsupported context.
+- Normalized duplicate queries are rejected.
+- Query text and rationale are explicitly bounded.
+- Optional known competitors are normalized, deduplicated, capped at 10, and treated as unverified hints.
+- Brand-profile and known-competitor data are serialized as untrusted data.
+- Query generation depends on `StructuredOutputProvider` rather than Gemini-specific code.
+
+### Tavily and External Retrieval
+
+- Tavily is isolated behind the asynchronous `SearchProvider` interface.
+- Real provider construction reads `TAVILY_API_KEY`.
+- Tests use injected fake clients/providers and require no credentials or live network access.
+- Tavily searches use:
+  - `topic="general"`
+  - `search_depth="basic"`
+  - maximum 5 results per query
+  - `include_answer=False`
+  - `include_raw_content=False`
+  - `auto_parameters=False`
+- Tavily-returned result URLs are not fetched.
+- Result URLs reuse the existing non-resolving URL-reference safety boundary.
+- Malformed, credential-bearing, localhost, literal-private/non-global, and non-HTTP URLs are rejected.
+- Results are deduplicated deterministically by normalized URL.
+- Titles and content are bounded.
+- Audited-site results are classified as `brand_owned`; other valid external sources are `independent`.
+- External-search concurrency is capped at three.
+- Result ordering remains aligned with recommendation-query ordering.
+- Successful zero-result searches remain distinct from provider/request failures.
+
+### Grounded Query Evaluation
+
+- Query evaluations use qualitative `low`, `medium`, or `high` evidence readiness.
+- Confidence uses `low`, `medium`, or `high`.
+- Readiness is evidence readiness, not answer-engine ranking probability, citation probability, mention probability, or product quality.
+- Failed external retrieval produces an explicit `unavailable` evaluation rather than fake low readiness.
+- Every completed evaluation must preserve the exact recommendation query.
+- External supporting URLs must exist in the validated Tavily catalog for that query.
+- Source ownership must match deterministic application classification.
+- Evidence excerpts must occur in the corresponding bounded source title/content representation.
+- Competitor evidence receives the same URL, ownership, and excerpt grounding checks.
+- Competitor names must occur in their cited external source.
+- Optional known competitors cannot silently become externally verified competitors.
+- External source content is JSON-encoded and treated as untrusted data.
+- Evaluation context and source representations are explicitly bounded.
+- Semantic grounding repair is limited to two total attempts.
+- Gemini/provider API failures remain outside the semantic-repair loop.
+
+## Initial Codex Verification
+
+- The first focused Task 7 test run produced 27 passing tests and 2 failures.
+- One failure came from a competitor prompt-boundary assertion expecting a newline removed by deterministic normalization.
+- One failure came from an escape-heavy source fixture exceeding the 4,000-character result-content schema limit.
+- The competitor test was updated to validate the actual JSON-delimited context.
+- The hostile-source fixture was reduced to the valid schema size while retaining delimiter-like and escape-heavy input.
+- The focused suite then passed with 29 tests.
+- Additional Codex review added explicit URL/domain limits, retrieval-state validation, and actual rendered-context bounds.
+- Final Codex focused Task 7 suite — 31 passed.
+- Complete backend suite after the Codex implementation — 186 passed.
+- `python -m pip check` — passed with `No broken requirements found.`
+- `python -m compileall -q main.py agents guardrails providers schemas services tests` — passed.
+- `git diff --check` — passed with only the Windows LF/CRLF conversion warning.
+- No automated Task 7 test made a live Tavily or Gemini request.
+
+## Human Review Hardening
+
+Human review identified three additional correctness issues after the initial Task 7 implementation.
+
+### Finding 1 — Medium/high readiness could lack supporting evidence
+
+The initial `QueryEvaluation` contract allowed a completed `medium` or `high` readiness judgment with an empty supporting-evidence list.
+
+### Manual change
+
+- Added a schema invariant requiring at least one supporting external evidence reference for `medium` and `high` readiness.
+- Preserved `low` readiness with zero supporting evidence as valid when a successful search finds no meaningful external support.
+
+### Finding 2 — Malformed Tavily responses could appear as zero evidence
+
+The initial Tavily provider converted malformed response structures into an empty result list, which could incorrectly make a provider problem look like a successful search that found no evidence.
+
+### Manual change
+
+- Added explicit Tavily response-shape validation.
+- Non-dictionary responses raise `SearchRequestError`.
+- Missing or non-list `results` payloads raise `SearchRequestError`.
+- A valid `{"results": []}` remains a successful zero-result search.
+
+### Finding 3 — Batch research swallowed arbitrary internal exceptions
+
+The initial external-research layer caught `Exception`, allowing an internal programming defect to be mislabeled as an external-search failure.
+
+### Manual change
+
+- Changed the failure boundary to catch only `SearchProviderError`.
+- Expected Tavily/search-provider failures remain explicit failed research records.
+- Unexpected internal exceptions propagate instead of being silently converted into retrieval failures.
+
+## Human-Review Test Iteration
+
+After introducing the medium/high supporting-evidence invariant, the first focused test run failed during test collection.
+
+An existing helper in `tests/test_query_evaluation.py` created a generic `medium` readiness evaluation without supporting evidence. The helper was being used for unrelated semantic-validation tests.
+
+The fixture was updated to use `low` readiness for generic evidence-free evaluations rather than weakening the new production invariant.
+
+The next focused Task 7 suite passed completely.
+
+## Final Verification
+
+- `.\.venv\Scripts\python.exe -m pytest tests/test_query_agent.py tests/test_tavily_provider.py tests/test_external_research.py tests/test_query_evaluation.py -q` — 37 passed in 0.77 seconds.
+- `.\.venv\Scripts\python.exe -m pytest -q` — 192 passed in 2.37 seconds.
+- Pytest emitted the existing non-blocking Windows `.pytest_cache` access warning; test execution completed successfully.
+- `.\.venv\Scripts\python.exe -m pip check` — `No broken requirements found.`
+- `.\.venv\Scripts\python.exe -m compileall -q main.py agents guardrails providers schemas services tests` — passed.
+- `git diff --check` — passed with no whitespace errors; Windows reported only the LF/CRLF conversion warning for `backend/requirements.txt`.
+
+## Final Result
+
+Task 7 establishes AnswerLens's complete external GEO intelligence layer before autonomous orchestration.
+
+AnswerLens can now generate realistic recommendation intents from an actual brand profile, retrieve bounded external evidence through Tavily, distinguish audited-site and independent sources, retain source-grounded competitor evidence, and use Gemini to produce strictly grounded qualitative query-readiness evaluations.
+
+Application-owned validation enforces external evidence URLs, source ownership, excerpts, competitor evidence, exact query identity, readiness semantics, bounded execution, and explicit retrieval-failure behavior rather than trusting model output alone.
+
+The stage intentionally does not yet perform autonomous follow-up research. LangGraph routing, additional evidence-gathering searches, Evidence Gap diagnosis, GEO experiments, metrics, execution tracing, persistence, audit APIs, baseline/rerun comparison, and frontend integration remain deferred.
+
+## Human Review
+
+- [x] Query Intelligence implementation and bounds reviewed.
+- [x] Tavily provider and external retrieval boundaries reviewed.
+- [x] External evidence and competitor grounding reviewed.
+- [x] Retrieval-failure semantics reviewed.
+- [x] Focused and complete backend test results reviewed.
+- [x] Repository diff reviewed before commit.

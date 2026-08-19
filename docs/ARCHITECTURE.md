@@ -1,6 +1,6 @@
 # Architecture
 
-AnswerLens uses a Next.js frontend and a FastAPI backend. The backend currently provides a health endpoint, secure bounded website crawling, deterministic machine-readable surface inspection, strict brand/evidence domain contracts, a typed Gemini structured-output provider, and a bounded Brand Intelligence extraction agent.
+AnswerLens uses a Next.js frontend and a FastAPI backend. The backend currently provides a health endpoint, secure bounded website crawling, deterministic machine-readable surface inspection, strict brand/evidence domain contracts, a typed Gemini structured-output provider, bounded Brand Intelligence and Claim Evidence Map agents, and a bounded external GEO intelligence layer for recommendation-query generation, Tavily evidence retrieval, competitor evidence discovery, and grounded query-readiness evaluation.
 
 ## Website crawler
 
@@ -186,3 +186,185 @@ Schema-valid outputs that violate application grounding invariants may be retrie
 - Claim Evidence Map records remain bounded by the existing maximum of 30 candidate brand claims
 
 The 40,000-character evidence bound is applied to the actual rendered JSON-encoded source representation, not only to raw source text. Deterministic prefix fitting ensures that JSON escaping cannot cause the final evidence prompt section to exceed the configured bound.
+
+## External GEO Intelligence Layer
+
+Task 7 adds the bounded external GEO intelligence stage. It connects recommendation-query generation, Tavily web research, external-source classification, competitor evidence, and Gemini-grounded query evaluation without yet introducing LangGraph orchestration or the autonomous evidence-research loop.
+
+The application-level flow is:
+
+```text
+BrandProfile
+    +
+ClaimEvidenceMap
+        ↓
+generate recommendation queries
+        ↓
+retrieve bounded Tavily evidence
+        ↓
+validate and classify external sources
+        ↓
+run grounded query evaluations
+        ↓
+ExternalGeoEvaluation
+
+```
+
+`backend/services/external_geo.py` exposes this vertical slice as an application-service helper. It does not persist audits, expose a public audit endpoint, or perform autonomous follow-up research.
+
+### Query Intelligence
+
+`backend/agents/query_agent.py` generates a bounded `RecommendationQuerySet` using the application-facing `StructuredOutputProvider`.
+
+Queries are derived from the supplied `BrandProfile` rather than from a fixed template list. The supported intent families are:
+
+- `category_discovery`
+- `alternative_comparison`
+- `audience_use_case`
+- `problem_driven`
+- `capability_driven`
+
+The model is asked to prefer approximately 8–12 useful buyer-style queries when the supplied evidence supports that variety. Sparse profiles may legitimately produce fewer queries rather than forcing invented categories, audiences, capabilities, use cases, or competitors.
+
+`RecommendationQuerySet` permits at most 12 queries. Query text and rationale are bounded, unexpected fields are rejected, and normalized duplicate queries are rejected deterministically.
+
+Optional known competitors are normalized, deduplicated, bounded to 10 values, and treated only as unverified user-supplied hints. They do not become evidence-backed competitors unless retrieved external evidence supports them.
+
+Brand-profile and competitor context is serialized into explicit untrusted-data sections. The prompt prohibits browsing, outside knowledge, unsupported capability invention, and treating embedded instruction-like content as prompt instructions.
+
+The rendered profile context is bounded to 20,000 characters after JSON encoding rather than only before serialization.
+
+### Search Provider Boundary
+
+`backend/providers/search.py` defines the application-facing asynchronous `SearchProvider` protocol and transport-level `RawSearchResult` representation.
+
+`backend/providers/tavily.py` implements this boundary using the official asynchronous Tavily client. Real provider construction reads `TAVILY_API_KEY` from the environment. Injected clients allow tests to run without credentials or live network requests.
+
+The Tavily search configuration is intentionally constrained:
+
+- Search topic: `general`
+- Search depth: `basic`
+- Maximum results requested per query: 5
+- Tavily-generated answers: disabled
+- Raw page content: disabled
+- Automatic search-parameter expansion: disabled
+
+AnswerLens uses Tavily as a bounded external retrieval source. Tavily is not used to generate the final GEO judgment, and returned result URLs are not independently crawled or fetched during this stage.
+
+### External Research Validation
+
+`backend/services/search.py` performs bounded research for generated queries.
+
+At most three Tavily searches execute concurrently, while the returned research batch preserves the original recommendation-query order.
+
+Each retained Tavily result preserves:
+
+- normalized URL
+- normalized host/domain
+- bounded title
+- bounded Tavily content
+- deterministic source ownership
+- optional Tavily relevance metadata
+
+Result URLs reuse the non-resolving URL-reference safety boundary. Only HTTP/HTTPS references are retained. Malformed URLs, credential-bearing URLs, localhost names, literal non-global/private IP references, and other invalid references are discarded without DNS resolution or fetching.
+
+Results are deduplicated deterministically by normalized URL and limited to five usable sources per query.
+
+Source ownership is classified deterministically from the audited target scope:
+
+- `brand_owned` for the audited website/same-site scope
+- `independent` for other valid external domains
+
+A third-party source is not classified as brand-owned merely because its content mentions the brand.
+
+A successful Tavily search containing zero usable results is distinct from a provider/request failure. Search-provider failures become explicit failed research records. Unexpected internal programming exceptions are not silently converted into search failures.
+
+Malformed Tavily response structures are treated as provider failures rather than as successful searches with zero evidence.
+
+### Grounded Query Evaluation
+
+`backend/agents/evaluation_agent.py` evaluates one recommendation query at a time through the existing `StructuredOutputProvider`.
+
+Evaluation input may contain:
+
+- the exact `RecommendationQuery`
+- bounded `BrandProfile` context
+- the existing local `ClaimEvidenceMap`
+- validated Tavily results for that query
+- optional known-competitor hints
+
+Local Task 6 claim evidence remains publisher-context evidence and is not relabeled as independent external evidence.
+
+The Task 7 `QueryEvaluation` contract represents:
+
+- exact query text
+- evaluation status
+- readiness
+- supporting external evidence
+- missing evidence
+- competitor evidence
+- confidence
+- human-readable reason
+
+Readiness is qualitative:
+
+- `low`
+- `medium`
+- `high`
+
+It represents evidence readiness for the supplied recommendation intent. It is not a product-quality score, market rank, answer-engine ranking probability, mention probability, or citation probability.
+
+Confidence remains `low`, `medium`, or `high` and represents confidence in the supplied-evidence classification, not the probability that an answer engine will mention the brand.
+
+A completed `medium` or `high` readiness evaluation must contain at least one supporting external evidence reference. `low` readiness may legitimately contain no supporting evidence after a successful external search.
+
+If external retrieval fails, the evaluation is explicitly `unavailable`; retrieval infrastructure failure is not converted into a fake low-readiness judgment.
+
+### Application-Side External Evidence Grounding
+
+Gemini output is not trusted merely because it satisfies the Pydantic schema.
+
+For each supporting external evidence reference, application-side validation requires:
+
+1. the URL to exist in the validated Tavily catalog for that exact query
+2. the returned source ownership to match the deterministic catalog classification
+3. the whitespace-normalized excerpt to occur in the bounded source title/content representation
+
+Unknown or fabricated URLs and fabricated/paraphrased excerpts that cannot be grounded in the supplied source are rejected.
+
+Competitor evidence follows the same URL, ownership, and excerpt grounding checks. In addition, the competitor name must occur in at least one of its cited external sources. User-supplied known competitors therefore cannot silently become externally verified competitors.
+
+Every completed evaluation must preserve the exact original recommendation-query text.
+
+Schema-valid output that violates these semantic grounding invariants may receive one repair attempt, for a maximum of two semantic attempts total. Provider/API exceptions propagate immediately and do not enter the semantic-repair loop.
+
+This semantic retry is only output repair. It is not the later autonomous evidence-gathering loop.
+
+### External Evaluation Trust Boundary
+
+Brand-profile values, local claim evidence, known-competitor hints, Tavily result titles, and Tavily result content are treated as untrusted data.
+
+External sources are serialized as JSON before prompt insertion. The prompt explicitly prohibits following instructions contained inside retrieved content, browsing outside the supplied data, inventing URLs, inventing excerpts, and using remembered competitor knowledge.
+
+Prepared external source rendering is bounded to 30,000 characters and application context to 20,000 characters. Limits are applied against the actual rendered JSON representation so escape-heavy content cannot silently exceed the configured prompt budget.
+
+### Task 7 Limits
+
+- Maximum recommendation queries: 12
+- Maximum Tavily results per query: 5
+- Maximum concurrent searches: 3
+- Maximum known competitors supplied to query generation: 10
+- Maximum query length: 500 characters
+- Maximum query rationale: 1,000 characters
+- Maximum Tavily title retained: 500 characters
+- Maximum Tavily content retained per result: 4,000 characters
+- Maximum external evidence references per evaluation: 10
+- Maximum missing-evidence entries per evaluation: 10
+- Maximum competitor-evidence entries per evaluation: 10
+- Maximum competitor-name length: 200 characters
+- Maximum evaluation reason: 2,000 characters
+- Maximum rendered external-source context: 30,000 characters
+- Maximum rendered application context: 20,000 characters
+- Maximum semantic evaluation attempts: 2
+
+Task 7 intentionally does not implement LangGraph, confidence-based research routing, follow-up Tavily searches, Evidence Gap diagnosis, GEO experiments, metrics, execution tracing, database persistence, audit APIs, or frontend audit screens. Those remain later workflow/product layers.
