@@ -72,7 +72,6 @@ AnswerLens intentionally does not manufacture a proprietary “ChatGPT score.”
 - **PostgreSQL / Neon persistence** with immutable audit history
 - **Baseline, rerun, and deterministic delta comparison**
 - **Safe provider failure handling** without fabricated results or leaked provider details
-- **No production mock mode or fake audit results**
 
 ---
 
